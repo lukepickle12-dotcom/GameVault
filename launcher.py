@@ -551,6 +551,7 @@ QPushButton:hover { color: #6b6b80; border-color: #2e2e40; }
         self.accept()
 
     def _on_discord_error(self, err):
+        print(f"DISCORD ERROR: {err}") # <--- ADD THIS TO SEE THE REAL PROBLEM
         self._login_btn.setText("  Sign in with Discord")
         self._login_btn.setEnabled(True)
         self._status_lbl.setText(f"Error: {err}")
