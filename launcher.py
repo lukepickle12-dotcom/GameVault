@@ -2728,40 +2728,41 @@ class GameVaultWindow(QWidget):
         super().__init__()
         self.setWindowTitle("Game Vault")
         self.setMinimumSize(800, 600)
-        self._active_key  = "library"
-        self._main_ready  = False
+        self._active_key = "library"
+        self._loader = None
+        self._bg = None
 
-        # ── Build the real UI first (hidden behind loader) ──
-        self._build_main_ui()
-
-        # ── Overlay the loading screen on top ──
+        # Show loader FIRST before anything else
         self._loader = LoadingScreen(self)
         self._loader.setGeometry(self.rect())
-        self._loader.raise_()
         self._loader.show()
+        self._loader.raise_()
 
-        # ── Kick off fake-progress then reveal ──
-        QTimer.singleShot(200, self._start_loading_sequence)
+        # Force Qt to actually paint the loader before we do heavy work
+        QApplication.processEvents()
 
-    # ── Loading sequence ──────────────────────────────────────────────────────
+        # Defer main UI build so the loader renders first
+        QTimer.singleShot(50, self._start_loading_sequence)
+
     def _start_loading_sequence(self):
-        """Simulate a loading sequence with progress steps, then fade out."""
         steps = [
-            (300,  10, "Scanning Steam library..."),
-            (700,  30, "Scanning Epic library..."),
-            (1100, 55, "Loading game assets..."),
-            (1500, 75, "Building your library..."),
-            (1900, 90, "Almost ready..."),
-            (2200, 100, "Ready!"),
+            (0,    10, "Scanning Steam library..."),
+            (400,  30, "Scanning Epic library..."),
+            (800,  55, "Loading game assets..."),
+            (1200, 75, "Building your library..."),
+            (1600, 90, "Almost ready..."),
         ]
         for delay, pct, status in steps:
             QTimer.singleShot(delay, lambda p=pct, s=status: self._loader.set_progress(p, s))
 
-        # After all steps, trigger finish + fade
-        QTimer.singleShot(2600, lambda: self._loader.finish_and_hide(on_done=self._on_loader_done))
+        # Build the real UI in the background after a short delay
+        QTimer.singleShot(500, self._build_main_ui)
+
+        # Finish loader after UI is built
+        QTimer.singleShot(2000, lambda: self._loader.set_progress(100, "Ready!"))
+        QTimer.singleShot(2300, lambda: self._loader.finish_and_hide(on_done=self._on_loader_done))
 
     def _on_loader_done(self):
-        """Called when the loading fade-out finishes — hide/remove the overlay."""
         self._loader.hide()
         self._loader.deleteLater()
         self._loader = None
