@@ -119,7 +119,30 @@ class LoadingScreen(QWidget):
         self.setGraphicsEffect(self._opacity_effect)
 
         self._build_ui()
+def mark_ready(self):
+        """Sets the UI to 100% and 'Ready' but stays visible."""
+        self._done = True
+        self.set_progress(100, "All systems ready", anim_ms=500)
+        self._done_lbl.setText("Waiting for signal...")
+        self._done_lbl.setVisible(True)
+        self._shimmer_timer.stop()
 
+    def start_fade_out(self, on_done=None):
+        """Manually trigger the fade whenever you want."""
+        self._done_lbl.setText("Launching ↗")
+        
+        self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
+        self._fade_anim.setDuration(1000) # Smooth 1 second fade
+        self._fade_anim.setStartValue(1.0)
+        self._fade_anim.setEndValue(0.0)
+        self._fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
+        
+        # This makes sure the widget actually disappears/deletes after fading
+        if on_done:
+            self._fade_anim.finished.connect(on_done)
+        self._fade_anim.finished.connect(self.hide) 
+        
+        self._fade_anim.start()
     def _build_ui(self):
         self.setStyleSheet("background: #0d0010;")
         root = QVBoxLayout(self)
