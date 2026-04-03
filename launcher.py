@@ -2954,3 +2954,14 @@ app.setPalette(palette)
 window = GameVaultWindow()
 window.show()
 app.exec()
+
+
+import sys
+
+if __name__ == "__main__":
+    # Check if we were launched via the protocol
+    if len(sys.argv) > 1 and "gamevault://" in sys.argv[1]:
+        # You can use a socket or a file to tell the ALREADY RUNNING 
+        # instance that the login was successful.
+        print("Protocol trigger detected:", sys.argv[1])
+        sys.exit(0)
