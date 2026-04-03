@@ -255,7 +255,7 @@ def mark_ready(self):
         # 2. Show the 'Launching' label
         self._done_lbl.setVisible(True)
         self._shimmer_timer.stop()
-
+QTimer.singleShot(4000, lambda: self.start_fade_out(on_done))
         def _do_fade():
             self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
             self._fade_anim.setDuration(1000) # Increased duration for smoother feel
