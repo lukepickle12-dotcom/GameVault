@@ -225,11 +225,17 @@ class LoadingScreen(QWidget):
     def finish_and_hide(self, on_done=None):
         """Animate bar to 100%, show 'Launching', then fade the overlay out."""
         self._done = True
+        
+        # 1. Force the progress bar to 100% immediately
+        self.set_progress(100, "Ready to play", anim_ms=300)
+        
+        # 2. Show the 'Launching' label
         self._done_lbl.setVisible(True)
         self._shimmer_timer.stop()
+
         def _do_fade():
             self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
-            self._fade_anim.setDuration(700)
+            self._fade_anim.setDuration(1000) # Increased duration for smoother feel
             self._fade_anim.setStartValue(1.0)
             self._fade_anim.setEndValue(0.0)
             self._fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
@@ -237,7 +243,9 @@ class LoadingScreen(QWidget):
                 self._fade_anim.finished.connect(on_done)
             self._fade_anim.start()
 
-        QTimer.singleShot(900, _do_fade)
+        # 3. Increase this delay. 
+        # 2000ms (2 seconds) gives the user time to actually see the '100%' state.
+        QTimer.singleShot(2000, _do_fade)
 
     def _shimmer(self):
         self._shimmer_phase = (self._shimmer_phase + 1) % 2
