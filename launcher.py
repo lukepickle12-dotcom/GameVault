@@ -40,6 +40,195 @@ try:
 except Exception:
     _HAS_MULTIMEDIA = False
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LOADING SCREEN WIDGET  (pure Qt — no webview needed)
+# ═══════════════════════════════════════════════════════════════════════════════
+class LoadingScreen(QWidget):
+    """Full-window loading overlay that paints directly in Qt."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setAutoFillBackground(True)
+        self._progress = 0
+        self._status   = "Initializing..."
+        self._done     = False
+
+        # Opacity effect for fade-out
+        self._opacity_effect = QGraphicsOpacityEffect(self)
+        self._opacity_effect.setOpacity(1.0)
+        self.setGraphicsEffect(self._opacity_effect)
+
+        self._build_ui()
+
+    # ── UI ────────────────────────────────────────────────────────────────────
+    def _build_ui(self):
+        self.setStyleSheet("background: #0d0010;")
+        root = QVBoxLayout(self)
+        root.setAlignment(Qt.AlignCenter)
+        root.setSpacing(0)
+        root.setContentsMargins(0, 0, 0, 0)
+
+        inner = QWidget()
+        inner.setStyleSheet("background: transparent;")
+        inner.setFixedWidth(400)
+        iv = QVBoxLayout(inner)
+        iv.setAlignment(Qt.AlignCenter)
+        iv.setSpacing(0)
+        iv.setContentsMargins(0, 0, 0, 0)
+
+        # Vault icon (SVG-ish using unicode + styling)
+        icon_lbl = QLabel("⬡")
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        icon_lbl.setStyleSheet(
+            "font-size: 72px; color: #534ab7; background: transparent; "
+            "letter-spacing: 0px;"
+        )
+        iv.addWidget(icon_lbl)
+        iv.addSpacing(18)
+
+        # Spinning ring label — we'll animate it with a timer
+        self._spin_lbl = QLabel("◌")
+        self._spin_lbl.setAlignment(Qt.AlignCenter)
+        self._spin_lbl.setStyleSheet(
+            "font-size: 90px; color: #7f77dd40; background: transparent;"
+        )
+        self._spin_lbl.setGeometry(0, 0, 400, 110)
+
+        # Title
+        title = QLabel("GAMEVAULT")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet(
+            "font-size: 38px; font-weight: 700; letter-spacing: 10px; "
+            "color: #eeedfe; background: transparent; font-family: 'Consolas', monospace;"
+        )
+        iv.addWidget(title)
+        iv.addSpacing(6)
+
+        subtitle = QLabel("LOADING YOUR LIBRARY")
+        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setStyleSheet(
+            "font-size: 10px; letter-spacing: 5px; color: #7f77dd; "
+            "background: transparent; font-family: 'Consolas', monospace;"
+        )
+        iv.addWidget(subtitle)
+        iv.addSpacing(44)
+
+        # Progress bar track
+        bar_container = QWidget()
+        bar_container.setFixedSize(360, 8)
+        bar_container.setStyleSheet(
+            "background: #2a1a40; border-radius: 4px; border: 1px solid #534ab7;"
+        )
+        bar_layout = QHBoxLayout(bar_container)
+        bar_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._bar_fill = QFrame(bar_container)
+        self._bar_fill.setGeometry(0, 0, 0, 8)
+        self._bar_fill.setStyleSheet(
+            "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+            "stop:0 #534ab7, stop:0.5 #afa9ec, stop:1 #7f77dd); "
+            "border-radius: 4px;"
+        )
+
+        iv.addWidget(bar_container, alignment=Qt.AlignCenter)
+        iv.addSpacing(12)
+
+        # Bottom row: status + percent
+        bottom_row = QHBoxLayout()
+        bottom_row.setContentsMargins(0, 0, 0, 0)
+
+        self._status_lbl = QLabel("Initializing...")
+        self._status_lbl.setStyleSheet(
+            "font-size: 11px; color: #534ab7; font-family: 'Consolas', monospace; "
+            "background: transparent;"
+        )
+
+        self._pct_lbl = QLabel("0%")
+        self._pct_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._pct_lbl.setStyleSheet(
+            "font-size: 11px; color: #7f77dd; font-family: 'Consolas', monospace; "
+            "background: transparent;"
+        )
+
+        bottom_row.addWidget(self._status_lbl)
+        bottom_row.addStretch()
+        bottom_row.addWidget(self._pct_lbl)
+
+        bottom_w = QWidget()
+        bottom_w.setFixedWidth(360)
+        bottom_w.setStyleSheet("background: transparent;")
+        bottom_w.setLayout(bottom_row)
+        iv.addWidget(bottom_w, alignment=Qt.AlignCenter)
+
+        # "Launching" done label
+        self._done_lbl = QLabel("Launching  ↗")
+        self._done_lbl.setAlignment(Qt.AlignCenter)
+        self._done_lbl.setStyleSheet(
+            "font-size: 12px; letter-spacing: 3px; color: #afa9ec; "
+            "background: transparent; font-family: 'Consolas', monospace;"
+        )
+        self._done_lbl.setVisible(False)
+        iv.addSpacing(18)
+        iv.addWidget(self._done_lbl)
+
+        root.addWidget(inner)
+
+        # Pulse shimmer on title — swap color every 1.2s
+        self._shimmer_timer = QTimer(self)
+        self._shimmer_timer.setInterval(1200)
+        self._shimmer_timer.timeout.connect(self._shimmer)
+        self._shimmer_timer.start()
+        self._shimmer_phase = 0
+
+        # Keep reference to bar container for resize
+        self._bar_container = bar_container
+
+    # ── public API ────────────────────────────────────────────────────────────
+    def set_progress(self, pct: int, status: str = ""):
+        self._progress = max(0, min(100, pct))
+        if status:
+            self._status = status
+        self._status_lbl.setText(self._status)
+        self._pct_lbl.setText(f"{self._progress}%")
+        bar_w = int(self._bar_container.width() * self._progress / 100)
+        self._bar_fill.setFixedWidth(bar_w)
+        self._bar_fill.setFixedHeight(self._bar_container.height())
+
+    def finish_and_hide(self, on_done=None):
+        """Show 'Launching' text then fade out the whole overlay."""
+        self._done     = True
+        self._done_lbl.setVisible(True)
+        self._shimmer_timer.stop()
+
+        def _do_fade():
+            self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
+            self._fade_anim.setDuration(700)
+            self._fade_anim.setStartValue(1.0)
+            self._fade_anim.setEndValue(0.0)
+            self._fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
+            if on_done:
+                self._fade_anim.finished.connect(on_done)
+            self._fade_anim.start()
+
+        QTimer.singleShot(900, _do_fade)
+
+    # ── internals ─────────────────────────────────────────────────────────────
+    def _shimmer(self):
+        self._shimmer_phase = (self._shimmer_phase + 1) % 2
+        colors = ["#eeedfe", "#afa9ec"]
+        # find title label — it's the QLabel with "GAMEVAULT" text
+        for child in self.findChildren(QLabel):
+            if child.text() == "GAMEVAULT":
+                c = colors[self._shimmer_phase]
+                child.setStyleSheet(
+                    f"font-size: 38px; font-weight: 700; letter-spacing: 10px; "
+                    f"color: {c}; background: transparent; font-family: 'Consolas', monospace;"
+                )
+                break
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  DISCORD OAUTH2 CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -63,9 +252,8 @@ _running_lock = threading.Lock()
 
 
 def _kill_current_game():
-    """Kill whatever game is currently running. Returns True if something was killed."""
     with _running_lock:
-        pid = _currently_running_game.get("pid")
+        pid  = _currently_running_game.get("pid")
         card = _currently_running_game.get("card")
         name = _currently_running_game.get("name")
         if pid:
@@ -78,10 +266,9 @@ def _kill_current_game():
                     p.kill()
             except Exception:
                 pass
-            _currently_running_game["pid"] = None
+            _currently_running_game["pid"]  = None
             _currently_running_game["name"] = None
             _currently_running_game["card"] = None
-            # Notify the card its game was killed
             if card and not getattr(card, '_destroyed', True):
                 try:
                     QTimer.singleShot(0, card._on_game_killed)
@@ -92,7 +279,6 @@ def _kill_current_game():
 
 
 def _resume_launcher_processes():
-    """Resume launchers after game exits."""
     launcher_names = [
         "steam.exe", "steamwebhelper.exe",
         "EpicGamesLauncher.exe", "EpicWebHelper.exe",
@@ -237,9 +423,8 @@ QPushButton:hover { color: #6b6b80; border-color: #2e2e40; }
 
     def _start_login(self):
         if DISCORD_CLIENT_ID == "YOUR_DISCORD_CLIENT_ID":
-            self._status_lbl.setText("⚠ Set your Discord app credentials in gamevault.py first!")
+            self._status_lbl.setText("⚠ Set your Discord app credentials in launcher.py first!")
             return
-
         DiscordOAuthHandler.auth_code = None
         self._start_local_server()
         webbrowser.open(DISCORD_AUTH_URL)
@@ -287,14 +472,12 @@ QPushButton:hover { color: #6b6b80; border-color: #2e2e40; }
             access_token = token_data.get("access_token")
             if not access_token:
                 raise ValueError("No access token in response")
-
             req2 = urllib.request.Request(
                 "https://discord.com/api/users/@me",
                 headers={"Authorization": f"Bearer {access_token}"},
             )
             with urllib.request.urlopen(req2, timeout=10) as resp2:
                 user = json.loads(resp2.read())
-
             avatar_hash = user.get("avatar")
             uid = user.get("id", "")
             if avatar_hash:
@@ -306,9 +489,7 @@ QPushButton:hover { color: #6b6b80; border-color: #2e2e40; }
                 user["avatar_url"] = (
                     f"https://cdn.discordapp.com/embed/avatars/{discriminator % 5}.png"
                 )
-
             QTimer.singleShot(0, lambda u=user: self._on_discord_success(u))
-
         except Exception as e:
             QTimer.singleShot(0, lambda err=str(e): self._on_discord_error(err))
 
@@ -499,10 +680,10 @@ def _parse_epic_manifest(manifest_path):
         return None
     if data.get("bIsIncompleteInstall", False):
         return None
-    display_name = data.get("DisplayName", "").strip()
-    app_name = data.get("AppName", "").strip()
-    install_loc = data.get("InstallLocation", "").strip()
-    launch_exe = data.get("LaunchExecutable", "").strip()
+    display_name    = data.get("DisplayName", "").strip()
+    app_name        = data.get("AppName", "").strip()
+    install_loc     = data.get("InstallLocation", "").strip()
+    launch_exe      = data.get("LaunchExecutable", "").strip()
     catalog_item_id = data.get("CatalogItemId", "").strip()
     catalog_namespace = data.get("CatalogNamespace", "").strip()
     if not display_name or not app_name:
@@ -580,7 +761,7 @@ def _download_image(url, dest):
             with open(dest, "wb") as f:
                 f.write(data)
             return True
-        except Exception as e:
+        except Exception:
             if attempt == 0:
                 time.sleep(0.5)
     return False
@@ -604,15 +785,12 @@ def _fetch_steam_cover(appid):
         f"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appid}/capsule_616x353.jpg",
         f"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appid}/capsule_467x181.jpg",
     ]
-
     dest_v = _cache_path(appid, "_cover_v.jpg")
     dest_h = _cache_path(appid, "_cover_h.jpg")
-
     for i, url in enumerate(urls_to_try):
         dest = dest_v if i < 2 else dest_h
         if _download_image(url, dest):
             return dest
-
     return ""
 
 
@@ -626,9 +804,7 @@ def _fetch_steam_assets(appid):
                 return cached
         except Exception:
             pass
-
     img_path = _fetch_steam_cover(appid)
-
     description = ""
     try:
         details_url = f"https://store.steampowered.com/api/appdetails?appids={appid}&filters=basic"
@@ -640,7 +816,6 @@ def _fetch_steam_assets(appid):
         description = d.get("short_description", "")
     except Exception:
         pass
-
     result = {"description": description, "img_path": img_path}
     with open(meta_cache, "w", encoding="utf-8") as f:
         json.dump(result, f)
@@ -651,17 +826,13 @@ def _fetch_epic_cover(game):
     appid     = game.get("appid", "")
     game_name = game.get("name", "")
     dest      = _cache_path(f"epic_{appid}", "_cover.jpg")
-
     if os.path.exists(dest) and os.path.getsize(dest) > 1024:
         return dest
-
     thumb = game.get("thumbnail", "")
     if thumb and os.path.exists(thumb) and os.path.getsize(thumb) > 1024:
         return thumb
-
     catalog_ns = game.get("catalog_namespace", "")
     catalog_id = game.get("catalog_item_id", "")
-
     epic_templates = []
     if catalog_ns and catalog_id:
         epic_templates = [
@@ -669,18 +840,15 @@ def _fetch_epic_cover(game):
             f"https://cdn1.epicgames.com/{catalog_ns}/offer/wide-1920x1080-{catalog_id}.jpg",
             f"https://cdn2.epicgames.com/{catalog_ns}/offer/wide-1920x1080-{catalog_id}.jpg",
         ]
-
     for url in epic_templates:
         if _download_image(url, dest):
             return dest
-
     try:
         encoded = urllib.parse.quote(game_name)
         search_url = f"https://store.steampowered.com/api/storesearch/?term={encoded}&l=english&cc=US"
         req = urllib.request.Request(search_url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=8) as resp:
             steam_data = json.loads(resp.read().decode("utf-8"))
-
         items = steam_data.get("items", [])
         for item in items[:3]:
             item_name = item.get("name", "").lower()
@@ -694,7 +862,6 @@ def _fetch_epic_cover(game):
                     return dest
     except Exception as e:
         print(f"[GameVault] Epic Steam fallback failed for {game_name}: {e}")
-
     return ""
 
 
@@ -712,17 +879,14 @@ def _fuzzy_name_match(name_a, name_b):
 def fetch_game_assets_async(game, on_done):
     appid  = game.get("appid", "")
     source = game.get("source", "")
-
     sig = _AssetSignal()
     sig.done.connect(on_done)
-
     with _active_signals_lock:
         _active_signals.append(sig)
 
     def _run():
         desc     = game.get("description", "")
         img_path = game.get("thumbnail", "")
-
         try:
             if source == "steam" and appid:
                 result   = _fetch_steam_assets(appid)
@@ -730,17 +894,13 @@ def fetch_game_assets_async(game, on_done):
                 fetched  = result.get("img_path", "")
                 if fetched and os.path.exists(fetched):
                     img_path = fetched
-
             elif source == "epic":
                 fetched = _fetch_epic_cover(game)
                 if fetched and os.path.exists(fetched):
                     img_path = fetched
-
         except Exception as e:
             print(f"[GameVault] Asset error for {game.get('name','?')}: {e}")
-
         sig.done.emit(desc, img_path)
-
         with _active_signals_lock:
             try:
                 _active_signals.remove(sig)
@@ -755,13 +915,13 @@ def fetch_game_assets_async(game, on_done):
 # ═══════════════════════════════════════════════════════════════════════════════
 def _find_running_game_pid(game):
     install_dir = game.get("install_dir", "").lower()
-    game_name = game.get("name", "").lower()
+    game_name   = game.get("name", "").lower()
     if not install_dir and not game_name:
         return None
     try:
         for proc in psutil.process_iter(["pid", "name", "exe"]):
             try:
-                exe = (proc.info.get("exe") or "").replace("\\", "/").lower()
+                exe   = (proc.info.get("exe") or "").replace("\\", "/").lower()
                 pname = (proc.info.get("name") or "").lower()
                 if install_dir and install_dir in exe:
                     return proc.info["pid"]
@@ -939,11 +1099,9 @@ class ClickableAvatar(QLabel):
             self._movie.frameChanged.disconnect()
             self._movie = None
         self._static_pixmap = None
-
         if not path or not os.path.exists(path):
             self.update()
             return
-
         ext = os.path.splitext(path)[1].lower()
         if ext == ".gif":
             self._movie = QMovie(path)
@@ -979,7 +1137,6 @@ class ClickableAvatar(QLabel):
         clip_path.addEllipse(rect_f)
         painter.setClipPath(clip_path)
         drawn = False
-
         if self._movie and self._movie.state() != QMovie.NotRunning:
             frame_px = self._movie.currentPixmap()
             if not frame_px.isNull():
@@ -994,7 +1151,6 @@ class ClickableAvatar(QLabel):
             oy = (scaled.height() - s) // 2
             painter.drawPixmap(-ox, -oy, scaled)
             drawn = True
-
         if not drawn:
             painter.fillRect(self.rect(), QColor(TH.bg_card))
             painter.setPen(QColor(TH.text_pri))
@@ -1002,7 +1158,6 @@ class ClickableAvatar(QLabel):
             font.setPointSize(s // 3)
             painter.setFont(font)
             painter.drawText(self.rect(), Qt.AlignCenter, self._default_emoji)
-
         painter.setClipping(False)
         pen = QPen(QColor(TH.accent), 2)
         painter.setPen(pen)
@@ -1347,10 +1502,9 @@ QSlider::sub-page:horizontal{{ background:{TH.accent}; height:4px; border-radius
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  ANIMATED OPACITY WIDGET — wraps any widget with fade in/out animation
+#  ANIMATED OPACITY WIDGET
 # ═══════════════════════════════════════════════════════════════════════════════
 class FadeWrapper(QWidget):
-    """Wraps a widget and provides fade-in animation support."""
     def __init__(self, child, delay_ms=0, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
@@ -1382,7 +1536,7 @@ class FadeWrapper(QWidget):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  GOG-STYLE GAME CARD  — with animations and smart launch
+#  GOG-STYLE GAME CARD
 # ═══════════════════════════════════════════════════════════════════════════════
 CARD_W = 210
 CARD_H = 480
@@ -1396,8 +1550,6 @@ class GogGameCard(QFrame):
         self._running_pid = None
         self._destroyed = False
         self._is_running = False
-        self._hover_anim = None
-        self._press_anim = None
 
         genre = game.get("genre", "")
         self._g_accent, gbg = GENRE_COLORS.get(genre, (TH.accent, TH.bg_card_h))
@@ -1470,7 +1622,6 @@ class GogGameCard(QFrame):
         badge_row.addStretch()
         iv.addLayout(badge_row)
 
-        # Launch hint label — shows on hover
         self._launch_hint = QLabel("▶  CLICK TO LAUNCH")
         self._launch_hint.setAlignment(Qt.AlignCenter)
         self._launch_hint.setStyleSheet(
@@ -1486,7 +1637,6 @@ class GogGameCard(QFrame):
         self._poll_timer.timeout.connect(self._check_running)
         self._poll_timer.start()
 
-        # RUNNING indicator — pulsing dot
         self._run_dot = QLabel("● RUNNING", self)
         self._run_dot.setGeometry(6, 6, 90, 18)
         self._run_dot.setAlignment(Qt.AlignCenter)
@@ -1495,7 +1645,6 @@ class GogGameCard(QFrame):
             f"font-size: 7px; font-weight: 700; font-family: {TH.font_fam}; border: none;")
         self._run_dot.hide()
 
-        # STOP hint — shows when running and hovered
         self._stop_hint = QLabel("⏹  CLICK TO STOP", self)
         self._stop_hint.setGeometry(6, 6, 120, 18)
         self._stop_hint.setAlignment(Qt.AlignCenter)
@@ -1504,13 +1653,11 @@ class GogGameCard(QFrame):
             f"font-size: 7px; font-weight: 700; font-family: {TH.font_fam}; border: none;")
         self._stop_hint.hide()
 
-        # Pulse timer for running indicator
         self._pulse_timer = QTimer(self)
         self._pulse_timer.setInterval(800)
         self._pulse_timer.timeout.connect(self._pulse_run_dot)
         self._pulse_phase = 0
 
-        # Loading indicator
         self._loading_lbl = QLabel("⟳", self._cover_container)
         self._loading_lbl.setAlignment(Qt.AlignCenter)
         self._loading_lbl.setGeometry(CARD_W - 22, 6, 16, 16)
@@ -1561,7 +1708,6 @@ class GogGameCard(QFrame):
             pass
 
     def _on_game_killed(self):
-        """Called when this card's game was killed (e.g. by launching another game)."""
         self._running_pid = None
         self._set_running_state(False)
         _resume_launcher_processes()
@@ -1590,23 +1736,18 @@ class GogGameCard(QFrame):
             self._loading_lbl.hide()
         except RuntimeError:
             return
-
         try:
             if not thumb_path or not os.path.exists(thumb_path):
                 return
-
             raw = QPixmap(thumb_path)
             if raw.isNull():
                 return
-
             cover_h = int(CARD_H * 0.68)
             w, h = CARD_W, cover_h
-
             scaled = raw.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
             x_off = max(0, (scaled.width() - w) // 2)
             y_off = max(0, (scaled.height() - h) // 2)
             cropped = scaled.copy(QRect(x_off, y_off, w, h))
-
             result = QPixmap(w, h)
             result.fill(Qt.transparent)
             p = QPainter(result)
@@ -1617,7 +1758,6 @@ class GogGameCard(QFrame):
             p.setClipPath(clip)
             p.drawPixmap(0, 0, cropped)
             p.end()
-
             self._art_lbl.setPixmap(result)
             self._art_lbl.raise_()
             self._art_lbl.show()
@@ -1625,7 +1765,6 @@ class GogGameCard(QFrame):
             self._cover_container.setStyleSheet(
                 "QFrame#CoverContainer { background: #080810; border-radius: 10px 10px 0 0; border: none; }"
             )
-
         except Exception as e:
             print(f"[GameVault] cover render error for {self._game.get('name','?')}: {e}")
 
@@ -1636,22 +1775,18 @@ class GogGameCard(QFrame):
         was_running = self._running_pid is not None
         self._running_pid = pid
         is_now_running = pid is not None
-
         if is_now_running != was_running:
             self._set_running_state(is_now_running)
-
-            # Update global tracker
             with _running_lock:
                 if is_now_running:
-                    _currently_running_game["pid"] = pid
+                    _currently_running_game["pid"]  = pid
                     _currently_running_game["name"] = self._game["name"]
                     _currently_running_game["card"] = self
                 elif _currently_running_game.get("name") == self._game["name"]:
-                    _currently_running_game["pid"] = None
+                    _currently_running_game["pid"]  = None
                     _currently_running_game["name"] = None
                     _currently_running_game["card"] = None
                     _resume_launcher_processes()
-
         try:
             self._run_dot.setVisible(is_now_running)
         except RuntimeError:
@@ -1667,12 +1802,10 @@ class GogGameCard(QFrame):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            # Animate press: scale down slightly via shadow
             try:
                 eff = self.graphicsEffect()
                 if isinstance(eff, QGraphicsDropShadowEffect):
-                    eff.setBlurRadius(8)
-                    eff.setOffset(0, 2)
+                    eff.setBlurRadius(8); eff.setOffset(0, 2)
             except Exception:
                 pass
             self._handle_click()
@@ -1682,35 +1815,48 @@ class GogGameCard(QFrame):
             try:
                 eff = self.graphicsEffect()
                 if isinstance(eff, QGraphicsDropShadowEffect):
-                    eff.setBlurRadius(20)
-                    eff.setOffset(0, 4)
+                    eff.setBlurRadius(20); eff.setOffset(0, 4)
             except Exception:
                 pass
 
     def _handle_click(self):
-        """Smart click: if running → kill it. If another game running → kill that first, then launch."""
         if self._is_running and self._running_pid:
-            # Kill this running game
             pid = self._running_pid
             self._running_pid = None
             self._set_running_state(False)
             with _running_lock:
                 if _currently_running_game.get("name") == self._game["name"]:
-                    _currently_running_game["pid"] = None
+                    _currently_running_game["pid"]  = None
                     _currently_running_game["name"] = None
                     _currently_running_game["card"] = None
             threading.Thread(target=lambda: (kill_game(pid), _resume_launcher_processes()), daemon=True).start()
         else:
             self._launch()
+
+    def _launch(self):
+        path = self._game.get("path", "")
+        name = self._game.get("name", "")
+        if not path:
+            return
+        user_data["play_counts"][name] = user_data["play_counts"].get(name, 0) + 1
+        save_user(user_data)
+        try:
+            if path.startswith("steam://") or path.startswith("com.epicgames"):
+                import webbrowser
+                webbrowser.open(path)
+            else:
+                subprocess.Popen([path], shell=True)
+        except Exception as e:
+            print(f"[GameVault] Launch error: {e}")
+
     def mouseDoubleClickEvent(self, event):
-        pass  # single click handles everything
+        pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  ANIMATED CARD WRAPPER — slide+fade on appearance
+#  ANIMATED CARD WRAPPER
 # ═══════════════════════════════════════════════════════════════════════════════
 class AnimatedCard(QWidget):
-    """Wraps a GogGameCard with entrance animation."""
     def __init__(self, card, delay_ms=0, parent=None):
         super().__init__(parent)
         self._card = card
@@ -1719,13 +1865,9 @@ class AnimatedCard(QWidget):
         layout.setSpacing(0)
         layout.addWidget(card)
         self.setFixedSize(card.size())
-
-        # Opacity effect
         self._opacity_effect = QGraphicsOpacityEffect(self)
         self._opacity_effect.setOpacity(0.0)
         self.setGraphicsEffect(self._opacity_effect)
-
-        # Start animation after delay
         QTimer.singleShot(delay_ms, self._animate_in)
 
     def _animate_in(self):
@@ -1750,24 +1892,21 @@ class AnimatedCard(QWidget):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  RESPONSIVE FLOW GRID  — with animated card transitions
+#  RESPONSIVE FLOW GRID
 # ═══════════════════════════════════════════════════════════════════════════════
 class FlowGridWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background: transparent;")
-        self._cards = []          # list of AnimatedCard wrappers
-        self._raw_cards = []      # list of GogGameCard
-        self._layout = QGridLayout(self)
+        self._cards     = []
+        self._raw_cards = []
+        self._layout    = QGridLayout(self)
         self._layout.setSpacing(14)
         self._layout.setContentsMargins(20, 20, 20, 20)
         self._layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self._last_cols = -1
-        self._animating = False
 
     def set_cards(self, game_list, on_launch=None, animate=True):
-        """Replace all cards, optionally with staggered entrance animations."""
-        # Clear existing
         while self._layout.count():
             self._layout.takeAt(0)
         for wrapper in self._cards:
@@ -1775,40 +1914,28 @@ class FlowGridWidget(QWidget):
                 wrapper.deleteLater()
             except Exception:
                 pass
-        self._cards = []
+        self._cards     = []
         self._raw_cards = []
-
         for i, game in enumerate(game_list):
-            card = GogGameCard(game, on_launch)
-            delay = min(i * 35, 600) if animate else 0  # stagger up to 600ms max
+            card    = GogGameCard(game, on_launch)
+            delay   = min(i * 35, 600) if animate else 0
             wrapper = AnimatedCard(card, delay_ms=delay)
             self._cards.append(wrapper)
             self._raw_cards.append(card)
-
         self._reflow(force=True)
 
     def filter_cards(self, game_list, on_launch=None):
-        """
-        Animate OUT cards that don't match, then animate IN new ones.
-        Used for search filtering with smooth transitions.
-        """
-        new_names = {g["name"] for g in game_list}
-        # For simplicity, just do a fade-transition rebuild
         self._fade_rebuild(game_list, on_launch)
 
     def _fade_rebuild(self, game_list, on_launch=None):
-        """Fade out all current cards, then fade in new ones."""
         if not self._cards:
             self.set_cards(game_list, on_launch, animate=True)
             return
-
-        # Fade out all current cards simultaneously
         remaining = [len(self._cards)]
 
         def _check_done():
             remaining[0] -= 1
             if remaining[0] <= 0:
-                # All faded out — now rebuild
                 while self._layout.count():
                     self._layout.takeAt(0)
                 for wrapper in self._cards:
@@ -1816,13 +1943,12 @@ class FlowGridWidget(QWidget):
                         wrapper.deleteLater()
                     except Exception:
                         pass
-                self._cards = []
+                self._cards     = []
                 self._raw_cards = []
                 self._last_cols = -1
-                # Build new cards with entrance animation
                 for i, game in enumerate(game_list):
-                    card = GogGameCard(game, on_launch)
-                    delay = min(i * 28, 400)
+                    card    = GogGameCard(game, on_launch)
+                    delay   = min(i * 28, 400)
                     wrapper = AnimatedCard(card, delay_ms=delay)
                     self._cards.append(wrapper)
                     self._raw_cards.append(card)
@@ -1831,32 +1957,27 @@ class FlowGridWidget(QWidget):
         if not self._cards:
             _check_done()
             return
-
         for wrapper in self._cards:
             wrapper.animate_out(_check_done)
 
     def _cols_for_width(self, w):
         available = w - 40
-        cols = max(1, available // (CARD_W + 14))
-        return cols
+        return max(1, available // (CARD_W + 14))
 
     def _reflow(self, force=False):
-        w = self.width() if self.width() > 0 else 900
+        w    = self.width() if self.width() > 0 else 900
         cols = self._cols_for_width(w)
         if not force and cols == self._last_cols and self._layout.count() == len(self._cards):
             return
         self._last_cols = cols
-
         while self._layout.count():
             self._layout.takeAt(0)
-
         if not self._cards:
             empty = QLabel("No games found")
             empty.setAlignment(Qt.AlignCenter)
             empty.setStyleSheet(f"font-size:14px; color:{TH.text_dim}; font-family:{TH.font_fam}; padding:40px;")
             self._layout.addWidget(empty, 0, 0)
             return
-
         for i, wrapper in enumerate(self._cards):
             r, c = divmod(i, cols)
             self._layout.addWidget(wrapper, r, c)
@@ -1869,18 +1990,18 @@ class FlowGridWidget(QWidget):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  LIBRARY PAGE — with animated search
+#  LIBRARY PAGE
 # ═══════════════════════════════════════════════════════════════════════════════
 class LibraryPage(QWidget):
     def __init__(self):
         super().__init__()
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self._tab = "all"
+        self._tab           = "all"
         self._filter_source = "all"
-        self._search_text = ""
+        self._search_text   = ""
         self._search_debounce = QTimer(self)
         self._search_debounce.setSingleShot(True)
-        self._search_debounce.setInterval(180)  # 180ms debounce
+        self._search_debounce.setInterval(180)
         self._search_debounce.timeout.connect(self._do_search_filter)
         self._initial_load = True
         self._build()
@@ -1907,7 +2028,6 @@ class LibraryPage(QWidget):
             tb.addWidget(btn)
 
         tb.addSpacing(16)
-
         for src, label, color in [("all", "All", TH.accent), ("steam", "Steam", "#1a9fff"), ("epic", "Epic", "#a855f7")]:
             has = any(g.get("source") == src for g in games) or src == "all"
             if not has:
@@ -1936,13 +2056,11 @@ class LibraryPage(QWidget):
             tb.addWidget(vw); tb.addSpacing(12)
         root.addWidget(topbar)
 
-        # ── Search bar with animated indicator ──
         search_bar = QWidget()
         search_bar.setStyleSheet("background: rgba(6,6,12,140); border-bottom: 1px solid rgba(255,255,255,5);")
         search_bar.setFixedHeight(44)
         sb_layout = QHBoxLayout(search_bar); sb_layout.setContentsMargins(18, 6, 18, 6); sb_layout.setSpacing(10)
 
-        # Animated search icon
         self._search_icon = QLabel("🔍")
         self._search_icon.setStyleSheet("background: transparent; font-size: 13px;")
         sb_layout.addWidget(self._search_icon)
@@ -1971,7 +2089,6 @@ QLineEdit:focus {{ border: 1px solid {TH.accent}80; background: rgba(255,255,255
         self._result_lbl.setMinimumWidth(80)
         sb_layout.addWidget(self._result_lbl)
 
-        # Searching spinner label
         self._searching_lbl = QLabel("filtering...")
         self._searching_lbl.setStyleSheet(f"font-size:9px; color:{TH.accent}80; font-family:{TH.font_fam}; background:transparent;")
         self._searching_lbl.hide()
@@ -1986,12 +2103,10 @@ QLineEdit:focus {{ border: 1px solid {TH.accent}80; background: rgba(255,255,255
         scroll.setWidget(self._flow_grid)
         root.addWidget(scroll)
 
-        # Initial populate with animation
         game_list = self._get_game_list()
         self._flow_grid.set_cards(game_list, animate=self._initial_load)
         self._initial_load = False
-        count = len(game_list)
-        self._result_lbl.setText(f"{count} games")
+        self._result_lbl.setText(f"{len(game_list)} games")
 
     def _get_game_list(self):
         if self._tab == "recent":
@@ -2022,23 +2137,17 @@ QLineEdit:focus {{ border: 1px solid {TH.accent}80; background: rgba(255,255,255
         else:
             self._flow_grid.set_cards(game_list, animate=True)
         count = len(game_list)
-        if self._search_text:
-            self._result_lbl.setText(f"{count} result{'s' if count != 1 else ''}")
-        else:
-            self._result_lbl.setText(f"{count} games")
+        self._result_lbl.setText(f"{count} result{'s' if count != 1 else ''}" if self._search_text else f"{count} games")
 
     def _on_search(self, text):
         self._search_text = text
         self._clear_btn.setVisible(bool(text))
-        # Show "filtering..." indicator
         self._searching_lbl.show()
         self._search_icon.setText("⟳")
-        # Debounce the actual filter
         self._search_debounce.stop()
         self._search_debounce.start()
 
     def _do_search_filter(self):
-        """Called after debounce — perform the animated filter."""
         self._searching_lbl.hide()
         self._search_icon.setText("🔍")
         self._populate(animated=True)
@@ -2050,11 +2159,6 @@ QLineEdit:focus {{ border: 1px solid {TH.accent}80; background: rgba(255,255,255
         self._searching_lbl.hide()
         self._search_icon.setText("🔍")
         self._search_debounce.stop()
-        self._populate(animated=True)
-
-    def _on_search_immediate(self, text):
-        """For tab/source changes — immediate repopulate."""
-        self._search_text = text
         self._populate(animated=True)
 
     def _set_tab(self, key):
@@ -2135,8 +2239,8 @@ class FriendsPage(QWidget):
         root.addWidget(right, stretch=1)
 
     def _friend_row(self, friend, selected):
-        sc = STATUS_COLOR.get(friend.get("status", "Offline"), TH.muted)
-        bg = "rgba(255,255,255,8)" if selected else "transparent"
+        sc  = STATUS_COLOR.get(friend.get("status", "Offline"), TH.muted)
+        bg  = "rgba(255,255,255,8)" if selected else "transparent"
         row = QFrame()
         row.setStyleSheet(f"QFrame{{background:{bg};border-radius:8px;}} QFrame:hover{{background:rgba(255,255,255,6);}}")
         row.setCursor(Qt.PointingHandCursor)
@@ -2243,7 +2347,7 @@ class SettingsPage(QWidget):
     def __init__(self, bg_widget):
         super().__init__()
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self._bg = bg_widget
+        self._bg      = bg_widget
         self._pending = user_data.get("theme", {}).copy()
         self._build()
 
@@ -2262,7 +2366,7 @@ class SettingsPage(QWidget):
 
         cv.addWidget(self._section_label("DISCORD ACCOUNT"))
         discord_frame = QFrame()
-        discord_frame.setStyleSheet(f"QFrame{{background:rgba(88,101,242,15); border:1px solid rgba(88,101,242,40); border-radius:10px;}}")
+        discord_frame.setStyleSheet("QFrame{background:rgba(88,101,242,15); border:1px solid rgba(88,101,242,40); border-radius:10px;}")
         df = QHBoxLayout(discord_frame); df.setContentsMargins(14, 12, 14, 12); df.setSpacing(12)
         discord_id = user_data.get("discord_id", "")
         if discord_id:
@@ -2351,16 +2455,13 @@ QPushButton:hover{{ background: #4752C4; }}""")
         dlg.exec()
 
     def _on_discord_login(self, discord_user):
-        user_data["discord_id"]       = discord_user.get("id", "")
-        user_data["discord_username"] = discord_user.get("username", "")
+        user_data["discord_id"]         = discord_user.get("id", "")
+        user_data["discord_username"]   = discord_user.get("username", "")
         user_data["discord_avatar_url"] = discord_user.get("avatar_url", "")
-
         global_name = discord_user.get("global_name") or discord_user.get("username", "")
         if global_name:
             user_data["username"] = global_name
-
         save_user(user_data)
-
         avatar_url = discord_user.get("avatar_url", "")
         if avatar_url:
             def _dl_avatar():
@@ -2376,8 +2477,8 @@ QPushButton:hover{{ background: #4752C4; }}""")
         self.theme_changed.emit()
 
     def _discord_logout(self):
-        user_data["discord_id"] = ""
-        user_data["discord_username"] = ""
+        user_data["discord_id"]         = ""
+        user_data["discord_username"]   = ""
         user_data["discord_avatar_url"] = ""
         av_cache = _cache_path("discord_avatar", ".jpg")
         if os.path.exists(av_cache):
@@ -2419,7 +2520,7 @@ NAV_ITEMS = [
     ("settings",  "⚙",  "Settings"),
 ]
 NAV_BOTTOM = [
-    ("news",  "📰", "News"),
+    ("news", "📰", "News"),
 ]
 
 
@@ -2446,7 +2547,7 @@ class GOGSidebar(QWidget):
         logo_w.setStyleSheet("background: transparent; border-bottom: 1px solid rgba(255,255,255,8);")
         ll = QHBoxLayout(logo_w); ll.setContentsMargins(16, 0, 14, 0)
         logo = QLabel("GAME\nVAULT"); logo.setStyleSheet(f"font-size:13px; font-weight:700; color:{TH.accent}; letter-spacing:2px; line-height:1.3; font-family:{TH.font_fam};")
-        dot = QLabel("●"); dot.setStyleSheet(f"color:{TH.accent}; font-size:8px;")
+        dot  = QLabel("●"); dot.setStyleSheet(f"color:{TH.accent}; font-size:8px;")
         ll.addWidget(logo); ll.addStretch(); ll.addWidget(dot, alignment=Qt.AlignVCenter)
         root.addWidget(logo_w)
         root.addSpacing(8)
@@ -2477,13 +2578,12 @@ class GOGSidebar(QWidget):
         nv = QVBoxLayout(); nv.setSpacing(1)
         name_lbl = QLabel(user_data.get("username", "Player One"))
         name_lbl.setStyleSheet(f"font-size:11px; font-weight:700; color:{TH.text_pri}; font-family:{TH.font_fam};")
-        status = user_data.get("status", "Online")
-        sc = STATUS_COLOR.get(status, TH.accent)
-
+        status     = user_data.get("status", "Online")
+        sc         = STATUS_COLOR.get(status, TH.accent)
         discord_id = user_data.get("discord_id", "")
         if discord_id:
-            st_lbl = QLabel(f"🎮 Discord")
-            st_lbl.setStyleSheet(f"font-size:8px; color:#5865F2; font-family:{TH.font_fam};")
+            st_lbl = QLabel("🎮 Discord")
+            st_lbl.setStyleSheet("font-size:8px; color:#5865F2; font-family:" + TH.font_fam + ";")
         else:
             st_lbl = QLabel(f"● {status}")
             st_lbl.setStyleSheet(f"font-size:8px; color:{sc}; font-family:{TH.font_fam};")
@@ -2544,7 +2644,7 @@ class PlaceholderPage(QWidget):
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PROFILE DIALOG
 # ═══════════════════════════════════════════════════════════════════════════════
-AVATARS = ["🎮", "🕹️", "👾", "🦾", "🧠", "🐉", "💀", "⚡", "🔥", "🛸", "🦊", "🌙", "⚔", "🏆", "🎯"]
+AVATARS     = ["🎮", "🕹️", "👾", "🦾", "🧠", "🐉", "💀", "⚡", "🔥", "🛸", "🦊", "🌙", "⚔", "🏆", "🎯"]
 STATUS_OPTS = ["Online", "Away", "Do Not Disturb", "Invisible"]
 
 
@@ -2598,7 +2698,7 @@ class ProfileDialog(QDialog):
 
         btn_row = QHBoxLayout()
         cancel = QPushButton("CANCEL"); cancel.setStyleSheet(ghost_btn(TH.text_sec)); cancel.clicked.connect(self.reject)
-        save = QPushButton("SAVE"); save.setStyleSheet(action_btn(TH.accent)); save.clicked.connect(self._save)
+        save   = QPushButton("SAVE");   save.setStyleSheet(action_btn(TH.accent));    save.clicked.connect(self._save)
         btn_row.addWidget(cancel); btn_row.addStretch(); btn_row.addWidget(save)
         root.addLayout(btn_row)
 
@@ -2614,24 +2714,60 @@ class ProfileDialog(QDialog):
 
     def _save(self):
         user_data["username"] = self._username.text().strip() or "Player One"
-        user_data["tag"] = self._tag.text().strip() or "#0001"
-        user_data["status"] = self._status.currentText()
-        user_data["avatar"] = self._sel_av
+        user_data["tag"]      = self._tag.text().strip() or "#0001"
+        user_data["status"]   = self._status.currentText()
+        user_data["avatar"]   = self._sel_av
         save_user(user_data); self.accept()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  MAIN WINDOW
+#  MAIN WINDOW  — with integrated loading screen
 # ═══════════════════════════════════════════════════════════════════════════════
 class GameVaultWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Game Vault")
         self.setMinimumSize(800, 600)
-        self._active_key = "library"
-        self._build()
+        self._active_key  = "library"
+        self._main_ready  = False
 
-    def _build(self):
+        # ── Build the real UI first (hidden behind loader) ──
+        self._build_main_ui()
+
+        # ── Overlay the loading screen on top ──
+        self._loader = LoadingScreen(self)
+        self._loader.setGeometry(self.rect())
+        self._loader.raise_()
+        self._loader.show()
+
+        # ── Kick off fake-progress then reveal ──
+        QTimer.singleShot(200, self._start_loading_sequence)
+
+    # ── Loading sequence ──────────────────────────────────────────────────────
+    def _start_loading_sequence(self):
+        """Simulate a loading sequence with progress steps, then fade out."""
+        steps = [
+            (300,  10, "Scanning Steam library..."),
+            (700,  30, "Scanning Epic library..."),
+            (1100, 55, "Loading game assets..."),
+            (1500, 75, "Building your library..."),
+            (1900, 90, "Almost ready..."),
+            (2200, 100, "Ready!"),
+        ]
+        for delay, pct, status in steps:
+            QTimer.singleShot(delay, lambda p=pct, s=status: self._loader.set_progress(p, s))
+
+        # After all steps, trigger finish + fade
+        QTimer.singleShot(2600, lambda: self._loader.finish_and_hide(on_done=self._on_loader_done))
+
+    def _on_loader_done(self):
+        """Called when the loading fade-out finishes — hide/remove the overlay."""
+        self._loader.hide()
+        self._loader.deleteLater()
+        self._loader = None
+
+    # ── Main UI ───────────────────────────────────────────────────────────────
+    def _build_main_ui(self):
         old = self.layout()
         if old:
             clear_layout(old); temp = QWidget(); temp.setLayout(old)
@@ -2652,7 +2788,7 @@ class GameVaultWindow(QWidget):
             "library":   self._library_page,
             "friends":   self._friends_page,
             "settings":  self._settings_page,
-            "downloads": PlaceholderPage("↓", "DOWNLOADS",  TH.neon_p),
+            "downloads": PlaceholderPage("↓", "DOWNLOADS", TH.neon_p),
             "news":      PlaceholderPage("📰", "NEWS",      TH.neon_b),
         }
 
@@ -2676,7 +2812,12 @@ class GameVaultWindow(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, "_bg") and self._bg:
-            self._bg.setGeometry(self.rect()); self._bg.lower()
+            self._bg.setGeometry(self.rect())
+            self._bg.lower()
+        # Keep loader covering the whole window while it's visible
+        if hasattr(self, "_loader") and self._loader:
+            self._loader.setGeometry(self.rect())
+            self._loader.raise_()
 
     def _navigate(self, key):
         self._active_key = key
@@ -2690,7 +2831,7 @@ class GameVaultWindow(QWidget):
             self._sidebar.refresh()
 
     def _on_theme_change(self):
-        self._build()
+        self._build_main_ui()
         self._sidebar.set_active(self._active_key)
         self._navigate(self._active_key)
 
@@ -2703,13 +2844,13 @@ app.setStyle("Fusion")
 
 from PySide6.QtGui import QPalette
 palette = QPalette()
-palette.setColor(QPalette.Window, QColor(7, 7, 9))
-palette.setColor(QPalette.WindowText, QColor(232, 232, 240))
-palette.setColor(QPalette.Base, QColor(10, 10, 16))
-palette.setColor(QPalette.AlternateBase, QColor(13, 13, 18))
-palette.setColor(QPalette.Text, QColor(232, 232, 240))
-palette.setColor(QPalette.Button, QColor(13, 13, 18))
-palette.setColor(QPalette.ButtonText, QColor(232, 232, 240))
+palette.setColor(QPalette.Window,          QColor(7, 7, 9))
+palette.setColor(QPalette.WindowText,      QColor(232, 232, 240))
+palette.setColor(QPalette.Base,            QColor(10, 10, 16))
+palette.setColor(QPalette.AlternateBase,   QColor(13, 13, 18))
+palette.setColor(QPalette.Text,            QColor(232, 232, 240))
+palette.setColor(QPalette.Button,          QColor(13, 13, 18))
+palette.setColor(QPalette.ButtonText,      QColor(232, 232, 240))
 app.setPalette(palette)
 
 window = GameVaultWindow()
