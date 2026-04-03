@@ -2937,6 +2937,25 @@ class GameVaultWindow(QWidget):
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════════════════
+if __name__ == "__main__":
+    import sys
+    
+    # Check if we were launched via the browser protocol (gamevault://)
+    if len(sys.argv) > 1 and "gamevault://" in sys.argv[1]:
+        # A second instance was launched by the browser.
+        # For now, we just close it. 
+        # In the future, you can add code here to send a signal to your main window.
+        print("Protocol received, closing second instance.")
+        sys.exit(0)
+
+    # Normal App Startup
+    app = QApplication(sys.argv)
+    
+    # Replace 'MainWindow' with whatever your main class is called
+    # window = MainWindow() 
+    # window.show()
+    
+    sys.exit(app.exec())
 app = QApplication([])
 app.setStyle("Fusion")
 
@@ -2954,14 +2973,3 @@ app.setPalette(palette)
 window = GameVaultWindow()
 window.show()
 app.exec()
-
-
-import sys
-
-if __name__ == "__main__":
-    # Check if we were launched via the protocol
-    if len(sys.argv) > 1 and "gamevault://" in sys.argv[1]:
-        # You can use a socket or a file to tell the ALREADY RUNNING 
-        # instance that the login was successful.
-        print("Protocol trigger detected:", sys.argv[1])
-        sys.exit(0)
