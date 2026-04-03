@@ -236,6 +236,7 @@ class LoadingScreen(QWidget):
             self._fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
             if on_done:
                 self._fade_anim.finished.connect(on_done)
+                time.sleep(4)
             self._fade_anim.start()
 
         QTimer.singleShot(900, _do_fade)
