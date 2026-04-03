@@ -2937,25 +2937,6 @@ class GameVaultWindow(QWidget):
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════════════════
-if __name__ == "__main__":
-    import sys
-    
-    # Check if we were launched via the browser protocol (gamevault://)
-    if len(sys.argv) > 1 and "gamevault://" in sys.argv[1]:
-        # A second instance was launched by the browser.
-        # For now, we just close it. 
-        # In the future, you can add code here to send a signal to your main window.
-        print("Protocol received, closing second instance.")
-        sys.exit(0)
-
-    # Normal App Startup
-    app = QApplication(sys.argv)
-    
-    # Replace 'MainWindow' with whatever your main class is called
-    # window = MainWindow() 
-    # window.show()
-    
-    sys.exit(app.exec())
 app = QApplication([])
 app.setStyle("Fusion")
 
@@ -2973,3 +2954,28 @@ app.setPalette(palette)
 window = GameVaultWindow()
 window.show()
 app.exec()
+
+if __name__ == "__main__":
+    import sys
+    
+    # 1. Protocol Handler (Keep this as you have it)
+    if len(sys.argv) > 1 and "gamevault://" in sys.argv[1]:
+        print("Protocol received, closing second instance.")
+        sys.exit(0)
+
+    # 2. Normal App Startup
+    app = QApplication(sys.argv)
+    
+    # 3. Create your Main Window
+    # Since your code didn't include the 'MainWindow' class, 
+    # I'll assume you're calling it GameVault.
+    # Replace 'GameVault' with the actual class name of your UI.
+    try:
+        window = GameVault() 
+        window.show()
+    except NameError:
+        # If you haven't written the MainWindow/GameVault class yet,
+        # This part will fail. You'll need to define that class first!
+        print("Error: MainWindow/GameVault class is not defined yet.")
+        
+    sys.exit(app.exec())
