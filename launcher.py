@@ -28,7 +28,7 @@ from PySide6.QtGui import (
 from PySide6.QtCore import (
     Qt, QRect, QTimer, QSize, Signal, QObject, QPropertyAnimation,
     QEasingCurve, QRectF, QPoint, QPointF, QThread, QParallelAnimationGroup,
-    QSequentialAnimationGroup, QAbstractAnimation,
+    QSequentialAnimationGroup, QAbstractAnimation, pyqtProperty,
 )
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -42,10 +42,67 @@ except Exception:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  LOADING SCREEN WIDGET  (pure Qt — no webview needed)
+#  SMOOTH PROGRESS BAR WIDGET
+# ═══════════════════════════════════════════════════════════════════════════════
+class SmoothProgressBar(QWidget):
+    """A progress bar that animates smoothly between values."""
+
+    def __init__(self, width=360, height=8, parent=None):
+        super().__init__(parent)
+        self._bar_width = width
+        self._bar_height = height
+        self.setFixedSize(width, height)
+        self._fill_pct = 0.0  # 0.0 to 100.0
+        self._anim = QPropertyAnimation(self, b"fillPct", self)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    @pyqtProperty(float)
+    def fillPct(self):
+        return self._fill_pct
+
+    @fillPct.setter
+    def fillPct(self, val):
+        self._fill_pct = max(0.0, min(100.0, val))
+        self.update()
+
+    def set_value(self, pct, duration_ms=400):
+        self._anim.stop()
+        self._anim.setDuration(duration_ms)
+        self._anim.setStartValue(self._fill_pct)
+        self._anim.setEndValue(float(pct))
+        self._anim.start()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w = self._bar_width
+        h = self._bar_height
+        # Track
+        p.setBrush(QBrush(QColor("#2a1a40")))
+        p.setPen(QPen(QColor("#534ab7"), 1))
+        p.drawRoundedRect(0, 0, w, h, h // 2, h // 2)
+        # Fill
+        fill_w = int(w * self._fill_pct / 100.0)
+        if fill_w > 0:
+            grad = QLinearGradient(0, 0, fill_w, 0)
+            grad.setColorAt(0.0, QColor("#534ab7"))
+            grad.setColorAt(0.5, QColor("#afa9ec"))
+            grad.setColorAt(1.0, QColor("#7f77dd"))
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(grad))
+            # clip to rounded rect
+            clip = QPainterPath()
+            clip.addRoundedRect(QRectF(0, 0, w, h), h / 2, h / 2)
+            p.setClipPath(clip)
+            p.drawRect(0, 0, fill_w, h)
+        p.end()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LOADING SCREEN WIDGET
 # ═══════════════════════════════════════════════════════════════════════════════
 class LoadingScreen(QWidget):
-    """Full-window loading overlay that paints directly in Qt."""
+    """Full-window loading overlay — smooth bar, full fade-out."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -55,14 +112,12 @@ class LoadingScreen(QWidget):
         self._status   = "Initializing..."
         self._done     = False
 
-        # Opacity effect for fade-out
         self._opacity_effect = QGraphicsOpacityEffect(self)
         self._opacity_effect.setOpacity(1.0)
         self.setGraphicsEffect(self._opacity_effect)
 
         self._build_ui()
 
-    # ── UI ────────────────────────────────────────────────────────────────────
     def _build_ui(self):
         self.setStyleSheet("background: #0d0010;")
         root = QVBoxLayout(self)
@@ -78,7 +133,6 @@ class LoadingScreen(QWidget):
         iv.setSpacing(0)
         iv.setContentsMargins(0, 0, 0, 0)
 
-        # Vault icon (SVG-ish using unicode + styling)
         icon_lbl = QLabel("⬡")
         icon_lbl.setAlignment(Qt.AlignCenter)
         icon_lbl.setStyleSheet(
@@ -88,15 +142,6 @@ class LoadingScreen(QWidget):
         iv.addWidget(icon_lbl)
         iv.addSpacing(18)
 
-        # Spinning ring label — we'll animate it with a timer
-        self._spin_lbl = QLabel("◌")
-        self._spin_lbl.setAlignment(Qt.AlignCenter)
-        self._spin_lbl.setStyleSheet(
-            "font-size: 90px; color: #7f77dd40; background: transparent;"
-        )
-        self._spin_lbl.setGeometry(0, 0, 400, 110)
-
-        # Title
         title = QLabel("GAMEVAULT")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet(
@@ -115,24 +160,9 @@ class LoadingScreen(QWidget):
         iv.addWidget(subtitle)
         iv.addSpacing(44)
 
-        # Progress bar track
-        bar_container = QWidget()
-        bar_container.setFixedSize(360, 8)
-        bar_container.setStyleSheet(
-            "background: #2a1a40; border-radius: 4px; border: 1px solid #534ab7;"
-        )
-        bar_layout = QHBoxLayout(bar_container)
-        bar_layout.setContentsMargins(0, 0, 0, 0)
-
-        self._bar_fill = QFrame(bar_container)
-        self._bar_fill.setGeometry(0, 0, 0, 8)
-        self._bar_fill.setStyleSheet(
-            "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-            "stop:0 #534ab7, stop:0.5 #afa9ec, stop:1 #7f77dd); "
-            "border-radius: 4px;"
-        )
-
-        iv.addWidget(bar_container, alignment=Qt.AlignCenter)
+        # ── Smooth progress bar ───────────────────────────────────────────────
+        self._progress_bar = SmoothProgressBar(width=360, height=8)
+        iv.addWidget(self._progress_bar, alignment=Qt.AlignCenter)
         iv.addSpacing(12)
 
         # Bottom row: status + percent
@@ -162,7 +192,6 @@ class LoadingScreen(QWidget):
         bottom_w.setLayout(bottom_row)
         iv.addWidget(bottom_w, alignment=Qt.AlignCenter)
 
-        # "Launching" done label
         self._done_lbl = QLabel("Launching  ↗")
         self._done_lbl.setAlignment(Qt.AlignCenter)
         self._done_lbl.setStyleSheet(
@@ -175,30 +204,25 @@ class LoadingScreen(QWidget):
 
         root.addWidget(inner)
 
-        # Pulse shimmer on title — swap color every 1.2s
+        # Title shimmer timer
         self._shimmer_timer = QTimer(self)
         self._shimmer_timer.setInterval(1200)
         self._shimmer_timer.timeout.connect(self._shimmer)
         self._shimmer_timer.start()
         self._shimmer_phase = 0
 
-        # Keep reference to bar container for resize
-        self._bar_container = bar_container
-
-    # ── public API ────────────────────────────────────────────────────────────
-    def set_progress(self, pct: int, status: str = ""):
+    def set_progress(self, pct: int, status: str = "", anim_ms: int = 400):
         self._progress = max(0, min(100, pct))
         if status:
             self._status = status
         self._status_lbl.setText(self._status)
         self._pct_lbl.setText(f"{self._progress}%")
-        bar_w = int(self._bar_container.width() * self._progress / 100)
-        self._bar_fill.setFixedWidth(bar_w)
-        self._bar_fill.setFixedHeight(self._bar_container.height())
+        # Animate bar smoothly
+        self._progress_bar.set_value(self._progress, duration_ms=anim_ms)
 
     def finish_and_hide(self, on_done=None):
-        """Show 'Launching' text then fade out the whole overlay."""
-        self._done     = True
+        """Animate bar to 100%, show 'Launching', then fade the overlay out."""
+        self._done = True
         self._done_lbl.setVisible(True)
         self._shimmer_timer.stop()
 
@@ -214,11 +238,9 @@ class LoadingScreen(QWidget):
 
         QTimer.singleShot(900, _do_fade)
 
-    # ── internals ─────────────────────────────────────────────────────────────
     def _shimmer(self):
         self._shimmer_phase = (self._shimmer_phase + 1) % 2
         colors = ["#eeedfe", "#afa9ec"]
-        # find title label — it's the QLabel with "GAMEVAULT" text
         for child in self.findChildren(QLabel):
             if child.text() == "GAMEVAULT":
                 c = colors[self._shimmer_phase]
@@ -2721,7 +2743,7 @@ class ProfileDialog(QDialog):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  MAIN WINDOW  — with integrated loading screen
+#  MAIN WINDOW — fixed loading sequence
 # ═══════════════════════════════════════════════════════════════════════════════
 class GameVaultWindow(QWidget):
     def __init__(self):
@@ -2731,54 +2753,84 @@ class GameVaultWindow(QWidget):
         self._active_key = "library"
         self._loader = None
         self._bg = None
+        self._main_ui_built = False
 
-        # Show loader FIRST before anything else
+        # Show loader FIRST — cover entire window
         self._loader = LoadingScreen(self)
         self._loader.setGeometry(self.rect())
         self._loader.show()
         self._loader.raise_()
 
-        # Force Qt to actually paint the loader before we do heavy work
+        # Allow the loader to paint before any heavy work starts
         QApplication.processEvents()
 
-        # Defer main UI build so the loader renders first
-        QTimer.singleShot(50, self._start_loading_sequence)
+        # Kick off the loading sequence
+        QTimer.singleShot(80, self._start_loading_sequence)
 
     def _start_loading_sequence(self):
+        """
+        Step timeline (all in ms from now):
+          0ms   → show loader at 0%
+          300ms → 15%  Scanning Steam
+          700ms → 35%  Scanning Epic
+         1100ms → 55%  Loading assets
+         1500ms → 72%  Building library
+         1900ms → 88%  Almost ready...
+         ────── build main UI in background thread at 1200ms ──────
+         2300ms → 100% Ready!
+         2700ms → "Launching" label shown, fade begins
+         3400ms → fade complete → loader hides → main UI revealed
+        """
+
+        # Progress steps — (delay_ms, percent, status_text, anim_duration_ms)
         steps = [
-            (0,    10, "Scanning Steam library..."),
-            (400,  30, "Scanning Epic library..."),
-            (800,  55, "Loading game assets..."),
-            (1200, 75, "Building your library..."),
-            (1600, 90, "Almost ready..."),
+            (300,  15,  "Scanning Steam library...",  350),
+            (700,  35,  "Scanning Epic library...",    350),
+            (1100, 55,  "Loading game assets...",      380),
+            (1500, 72,  "Building your library...",    400),
+            (1900, 88,  "Almost ready...",             350),
+            (2300, 100, "Ready!",                      300),
         ]
-        for delay, pct, status in steps:
-            QTimer.singleShot(delay, lambda p=pct, s=status: self._loader.set_progress(p, s))
+        for delay, pct, status, dur in steps:
+            QTimer.singleShot(delay, lambda p=pct, s=status, d=dur: self._loader.set_progress(p, s, d))
 
-        # Build the real UI in the background after a short delay
-        QTimer.singleShot(500, self._build_main_ui)
+        # Build the hidden main UI in background — does NOT interrupt the loader
+        # because it happens in the Qt thread but only after the loader is well-rendered.
+        # We do it at 1400ms so it's done long before the fade at 2700ms.
+        QTimer.singleShot(1400, self._build_main_ui)
 
-        # Finish loader after UI is built
-        QTimer.singleShot(2000, lambda: self._loader.set_progress(100, "Ready!"))
-        QTimer.singleShot(2300, lambda: self._loader.finish_and_hide(on_done=self._on_loader_done))
+        # After bar hits 100% (2300ms + 300ms anim ≈ 2600ms), trigger finish
+        QTimer.singleShot(2700, self._begin_loader_exit)
+
+    def _begin_loader_exit(self):
+        if self._loader:
+            self._loader.finish_and_hide(on_done=self._on_loader_done)
 
     def _on_loader_done(self):
-        self._loader.hide()
-        self._loader.deleteLater()
-        self._loader = None
+        if self._loader:
+            self._loader.hide()
+            self._loader.deleteLater()
+            self._loader = None
 
     # ── Main UI ───────────────────────────────────────────────────────────────
     def _build_main_ui(self):
+        if self._main_ui_built:
+            return
+        self._main_ui_built = True
+
         old = self.layout()
         if old:
-            clear_layout(old); temp = QWidget(); temp.setLayout(old)
+            clear_layout(old)
+            temp = QWidget(); temp.setLayout(old)
 
-        if not hasattr(self, "_bg") or self._bg is None:
+        if not self._bg:
             self._bg = LiveBackground(self)
             self._bg.setGeometry(self.rect())
             self._bg.lower()
 
-        root = QHBoxLayout(self); root.setContentsMargins(0, 0, 0, 0); root.setSpacing(0)
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
         self._library_page  = LibraryPage()
         self._friends_page  = FriendsPage()
@@ -2803,20 +2855,25 @@ class GameVaultWindow(QWidget):
         self._sidebar.navigate.connect(self._navigate)
         self._sidebar.set_active(self._active_key)
 
-        sep = QFrame(); sep.setFrameShape(QFrame.VLine); sep.setFixedWidth(1)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setFixedWidth(1)
         sep.setStyleSheet("QFrame{ background: rgba(255,255,255,8); }")
 
         root.addWidget(self._sidebar)
         root.addWidget(sep)
         root.addWidget(self._stack, stretch=1)
 
+        # Keep loader on top while it's still fading
+        if self._loader:
+            self._loader.raise_()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, "_bg") and self._bg:
+        if self._bg:
             self._bg.setGeometry(self.rect())
             self._bg.lower()
-        # Keep loader covering the whole window while it's visible
-        if hasattr(self, "_loader") and self._loader:
+        if self._loader:
             self._loader.setGeometry(self.rect())
             self._loader.raise_()
 
@@ -2832,6 +2889,7 @@ class GameVaultWindow(QWidget):
             self._sidebar.refresh()
 
     def _on_theme_change(self):
+        self._main_ui_built = False
         self._build_main_ui()
         self._sidebar.set_active(self._active_key)
         self._navigate(self._active_key)
