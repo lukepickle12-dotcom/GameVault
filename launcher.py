@@ -263,7 +263,6 @@ def mark_ready(self):
             self._fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
             if on_done:
                 self._fade_anim.finished.connect(on_done)
-                time.sleep(4)
             self._fade_anim.start()
 
         # 3. Increase this delay. 
