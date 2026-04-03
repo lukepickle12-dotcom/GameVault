@@ -28,7 +28,7 @@ from PySide6.QtGui import (
 from PySide6.QtCore import (
     Qt, QRect, QTimer, QSize, Signal, QObject, QPropertyAnimation,
     QEasingCurve, QRectF, QPoint, QPointF, QThread, QParallelAnimationGroup,
-    QSequentialAnimationGroup, QAbstractAnimation, pyqtProperty,
+    QSequentialAnimationGroup, QAbstractAnimation, Property,
 )
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -56,7 +56,7 @@ class SmoothProgressBar(QWidget):
         self._anim = QPropertyAnimation(self, b"fillPct", self)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
 
-    @pyqtProperty(float)
+    @Property(float)
     def fillPct(self):
         return self._fill_pct
 
