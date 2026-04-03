@@ -56,14 +56,16 @@ class SmoothProgressBar(QWidget):
         self._anim = QPropertyAnimation(self, b"fillPct", self)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
 
-    @Property(float)
-    def fillPct(self):
+    # ── FIX #1: Proper PySide6 Property pattern ───────────────────────────────
+    def _get_fillPct(self):
         return self._fill_pct
 
-    @fillPct.setter
-    def fillPct(self, val):
+    def _set_fillPct(self, val):
         self._fill_pct = max(0.0, min(100.0, val))
         self.update()
+
+    fillPct = Property(float, _get_fillPct, _set_fillPct)
+    # ─────────────────────────────────────────────────────────────────────────
 
     def set_value(self, pct, duration_ms=400):
         self._anim.stop()
@@ -1858,18 +1860,48 @@ class GogGameCard(QFrame):
     def _launch(self):
         path = self._game.get("path", "")
         name = self._game.get("name", "")
+        source = self._game.get("source", "")
+
         if not path:
             return
+
+        # Record the play count
         user_data["play_counts"][name] = user_data["play_counts"].get(name, 0) + 1
         save_user(user_data)
-        try:
-            if path.startswith("steam://") or path.startswith("com.epicgames"):
-                import webbrowser
-                webbrowser.open(path)
-            else:
-                subprocess.Popen([path], shell=True)
-        except Exception as e:
-            print(f"[GameVault] Launch error: {e}")
+
+        def _do_launch():
+            try:
+                # ── FIX #2: Correct launch logic for all game types ───────────
+                if path.startswith("steam://") or path.startswith("com.epicgames.launcher://"):
+                    # Steam & Epic protocol URLs — use ShellExecute on Windows,
+                    # webbrowser module on all platforms (most reliable)
+                    import sys
+                    if sys.platform == "win32":
+                        os.startfile(path)
+                    else:
+                        webbrowser.open(path)
+
+                elif os.path.isfile(path):
+                    # Direct executable — launch without shell=True so the
+                    # path is passed correctly even if it contains spaces
+                    subprocess.Popen(
+                        [path],
+                        cwd=os.path.dirname(path),
+                        creationflags=subprocess.DETACHED_PROCESS if hasattr(subprocess, "DETACHED_PROCESS") else 0,
+                    )
+
+                else:
+                    # Fallback: let the OS handle whatever string we have
+                    import sys
+                    if sys.platform == "win32":
+                        os.startfile(path)
+                    else:
+                        subprocess.Popen(path, shell=True)
+
+            except Exception as e:
+                print(f"[GameVault] Launch error for '{name}': {e}")
+
+        threading.Thread(target=_do_launch, daemon=True).start()
 
     def mouseDoubleClickEvent(self, event):
         pass
@@ -2743,7 +2775,7 @@ class ProfileDialog(QDialog):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  MAIN WINDOW — fixed loading sequence
+#  MAIN WINDOW
 # ═══════════════════════════════════════════════════════════════════════════════
 class GameVaultWindow(QWidget):
     def __init__(self):
@@ -2768,21 +2800,6 @@ class GameVaultWindow(QWidget):
         QTimer.singleShot(80, self._start_loading_sequence)
 
     def _start_loading_sequence(self):
-        """
-        Step timeline (all in ms from now):
-          0ms   → show loader at 0%
-          300ms → 15%  Scanning Steam
-          700ms → 35%  Scanning Epic
-         1100ms → 55%  Loading assets
-         1500ms → 72%  Building library
-         1900ms → 88%  Almost ready...
-         ────── build main UI in background thread at 1200ms ──────
-         2300ms → 100% Ready!
-         2700ms → "Launching" label shown, fade begins
-         3400ms → fade complete → loader hides → main UI revealed
-        """
-
-        # Progress steps — (delay_ms, percent, status_text, anim_duration_ms)
         steps = [
             (300,  15,  "Scanning Steam library...",  350),
             (700,  35,  "Scanning Epic library...",    350),
@@ -2794,12 +2811,7 @@ class GameVaultWindow(QWidget):
         for delay, pct, status, dur in steps:
             QTimer.singleShot(delay, lambda p=pct, s=status, d=dur: self._loader.set_progress(p, s, d))
 
-        # Build the hidden main UI in background — does NOT interrupt the loader
-        # because it happens in the Qt thread but only after the loader is well-rendered.
-        # We do it at 1400ms so it's done long before the fade at 2700ms.
         QTimer.singleShot(1400, self._build_main_ui)
-
-        # After bar hits 100% (2300ms + 300ms anim ≈ 2600ms), trigger finish
         QTimer.singleShot(2700, self._begin_loader_exit)
 
     def _begin_loader_exit(self):
@@ -2812,7 +2824,6 @@ class GameVaultWindow(QWidget):
             self._loader.deleteLater()
             self._loader = None
 
-    # ── Main UI ───────────────────────────────────────────────────────────────
     def _build_main_ui(self):
         if self._main_ui_built:
             return
@@ -2864,7 +2875,6 @@ class GameVaultWindow(QWidget):
         root.addWidget(sep)
         root.addWidget(self._stack, stretch=1)
 
-        # Keep loader on top while it's still fading
         if self._loader:
             self._loader.raise_()
 
