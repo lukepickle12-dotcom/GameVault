@@ -227,7 +227,6 @@ class LoadingScreen(QWidget):
         self._done = True
         self._done_lbl.setVisible(True)
         self._shimmer_timer.stop()
-        time.sleep(4)
         def _do_fade():
             self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
             self._fade_anim.setDuration(700)
