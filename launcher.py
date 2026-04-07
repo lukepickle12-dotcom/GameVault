@@ -101,20 +101,15 @@ class SmoothProgressBar(QWidget):
 
 
 def finish_and_hide(self, on_done=None):
-    """Animate bar to 100%, show 'Launching', then fade the overlay out."""
     self._done = True
-    
-    # 1. Force the progress bar to 100% immediately
-    self.set_progress(100, "Ready to play", anim_ms=500)
-    
-    # 2. Show the 'Launching' label
+    # Fast final progress
+    self.set_progress(100, "Ready to play", anim_ms=150)
     self._done_lbl.setVisible(True)
     self._shimmer_timer.stop()
 
-    # 3. Fade out after a longer delay (e.g., 3 seconds)
     def _do_fade():
         self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
-        self._fade_anim.setDuration(1500)  # 1.5 seconds fade
+        self._fade_anim.setDuration(800)  # slightly faster fade
         self._fade_anim.setStartValue(1.0)
         self._fade_anim.setEndValue(0.0)
         self._fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
@@ -122,9 +117,8 @@ def finish_and_hide(self, on_done=None):
             self._fade_anim.finished.connect(on_done)
         self._fade_anim.finished.connect(self.hide)
         self._fade_anim.start()
-    
-    # Delay before fading out (3000ms = 3 seconds)
-    QTimer.singleShot(3000, _do_fade)
+
+    QTimer.singleShot(1000, _do_fade)  # fade starts after 1 second
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
