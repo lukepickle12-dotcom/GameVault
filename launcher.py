@@ -118,7 +118,7 @@ def finish_and_hide(self, on_done=None):
         self._fade_anim.finished.connect(self.hide)
         self._fade_anim.start()
 
-    QTimer.singleShot(1000, _do_fade)  # fade starts after 1 second
+   # QTimer.singleShot(1000, _do_fade)  # fade starts after 1 second
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
