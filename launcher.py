@@ -102,14 +102,17 @@ class SmoothProgressBar(QWidget):
 
 def finish_and_hide(self, on_done=None):
     self._done = True
-    # Fast final progress
-    self.set_progress(100, "Ready to play", anim_ms=150)
+    remaining_pct = 100 - self._progress_bar.fillPct
+    # make final fill take proportional time to remaining
+    final_duration = max(200, int(400 * (remaining_pct / 100)))
+    self._progress_bar.set_value(100, duration_ms=final_duration)
+
     self._done_lbl.setVisible(True)
     self._shimmer_timer.stop()
 
     def _do_fade():
         self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
-        # self._fade_anim.setDuration(400)  # slightly faster fade
+        self._fade_anim.setDuration(400)
         self._fade_anim.setStartValue(1.0)
         self._fade_anim.setEndValue(0.0)
         self._fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
@@ -118,8 +121,8 @@ def finish_and_hide(self, on_done=None):
         self._fade_anim.finished.connect(self.hide)
         self._fade_anim.start()
 
-   # QTimer.singleShot(1000, _do_fade)  # fade starts after 1 second
-
+    # start fade slightly after final fill begins
+    QTimer.singleShot(final_duration // 2, _do_fade)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  DISCORD OAUTH2 CONFIG
