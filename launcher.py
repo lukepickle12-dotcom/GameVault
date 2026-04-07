@@ -100,186 +100,31 @@ class SmoothProgressBar(QWidget):
         p.end()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  LOADING SCREEN WIDGET
-# ═══════════════════════════════════════════════════════════════════════════════
-class LoadingScreen(QWidget):
-    """Full-window loading overlay — smooth bar, full fade-out."""
+def finish_and_hide(self, on_done=None):
+    """Animate bar to 100%, show 'Launching', then fade the overlay out."""
+    self._done = True
+    
+    # 1. Force the progress bar to 100% immediately
+    self.set_progress(100, "Ready to play", anim_ms=500)
+    
+    # 2. Show the 'Launching' label
+    self._done_lbl.setVisible(True)
+    self._shimmer_timer.stop()
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAttribute(Qt.WA_TranslucentBackground, False)
-        self.setAutoFillBackground(True)
-        self._progress = 0
-        self._status   = "Initializing..."
-        self._done     = False
-
-        self._opacity_effect = QGraphicsOpacityEffect(self)
-        self._opacity_effect.setOpacity(1.0)
-        self.setGraphicsEffect(self._opacity_effect)
-
-        self._build_ui()
-def mark_ready(self):
-        """Sets the UI to 100% and 'Ready' but stays visible."""
-        self._done = True
-        self.set_progress(100, "All systems ready", anim_ms=500)
-        self._done_lbl.setText("Waiting for signal...")
-        self._done_lbl.setVisible(True)
-        self._shimmer_timer.stop()
-
-    def start_fade_out(self, on_done=None):
-        """Manually trigger the fade whenever you want."""
-        self._done_lbl.setText("Launching ↗")
-        
+    # 3. Fade out after a longer delay (e.g., 3 seconds)
+    def _do_fade():
         self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
-        self._fade_anim.setDuration(1000) # Smooth 1 second fade
+        self._fade_anim.setDuration(1500)  # 1.5 seconds fade
         self._fade_anim.setStartValue(1.0)
         self._fade_anim.setEndValue(0.0)
         self._fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
-        
-        # This makes sure the widget actually disappears/deletes after fading
         if on_done:
             self._fade_anim.finished.connect(on_done)
-        self._fade_anim.finished.connect(self.hide) 
-        
+        self._fade_anim.finished.connect(self.hide)
         self._fade_anim.start()
-    def _build_ui(self):
-        self.setStyleSheet("background: #0d0010;")
-        root = QVBoxLayout(self)
-        root.setAlignment(Qt.AlignCenter)
-        root.setSpacing(0)
-        root.setContentsMargins(0, 0, 0, 0)
-
-        inner = QWidget()
-        inner.setStyleSheet("background: transparent;")
-        inner.setFixedWidth(400)
-        iv = QVBoxLayout(inner)
-        iv.setAlignment(Qt.AlignCenter)
-        iv.setSpacing(0)
-        iv.setContentsMargins(0, 0, 0, 0)
-
-        icon_lbl = QLabel("⬡")
-        icon_lbl.setAlignment(Qt.AlignCenter)
-        icon_lbl.setStyleSheet(
-            "font-size: 72px; color: #534ab7; background: transparent; "
-            "letter-spacing: 0px;"
-        )
-        iv.addWidget(icon_lbl)
-        iv.addSpacing(18)
-
-        title = QLabel("GAMEVAULT")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet(
-            "font-size: 38px; font-weight: 700; letter-spacing: 10px; "
-            "color: #eeedfe; background: transparent; font-family: 'Consolas', monospace;"
-        )
-        iv.addWidget(title)
-        iv.addSpacing(6)
-
-        subtitle = QLabel("LOADING YOUR LIBRARY")
-        subtitle.setAlignment(Qt.AlignCenter)
-        subtitle.setStyleSheet(
-            "font-size: 10px; letter-spacing: 5px; color: #7f77dd; "
-            "background: transparent; font-family: 'Consolas', monospace;"
-        )
-        iv.addWidget(subtitle)
-        iv.addSpacing(44)
-
-        # ── Smooth progress bar ───────────────────────────────────────────────
-        self._progress_bar = SmoothProgressBar(width=360, height=8)
-        iv.addWidget(self._progress_bar, alignment=Qt.AlignCenter)
-        iv.addSpacing(12)
-
-        # Bottom row: status + percent
-        bottom_row = QHBoxLayout()
-        bottom_row.setContentsMargins(0, 0, 0, 0)
-
-        self._status_lbl = QLabel("Initializing...")
-        self._status_lbl.setStyleSheet(
-            "font-size: 11px; color: #534ab7; font-family: 'Consolas', monospace; "
-            "background: transparent;"
-        )
-
-        self._pct_lbl = QLabel("0%")
-        self._pct_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self._pct_lbl.setStyleSheet(
-            "font-size: 11px; color: #7f77dd; font-family: 'Consolas', monospace; "
-            "background: transparent;"
-        )
-
-        bottom_row.addWidget(self._status_lbl)
-        bottom_row.addStretch()
-        bottom_row.addWidget(self._pct_lbl)
-
-        bottom_w = QWidget()
-        bottom_w.setFixedWidth(360)
-        bottom_w.setStyleSheet("background: transparent;")
-        bottom_w.setLayout(bottom_row)
-        iv.addWidget(bottom_w, alignment=Qt.AlignCenter)
-
-        self._done_lbl = QLabel("Launching  ↗")
-        self._done_lbl.setAlignment(Qt.AlignCenter)
-        self._done_lbl.setStyleSheet(
-            "font-size: 12px; letter-spacing: 3px; color: #afa9ec; "
-            "background: transparent; font-family: 'Consolas', monospace;"
-        )
-        self._done_lbl.setVisible(False)
-        iv.addSpacing(18)
-        iv.addWidget(self._done_lbl)
-
-        root.addWidget(inner)
-
-        # Title shimmer timer
-        self._shimmer_timer = QTimer(self)
-        self._shimmer_timer.setInterval(1200)
-        self._shimmer_timer.timeout.connect(self._shimmer)
-        self._shimmer_timer.start()
-        self._shimmer_phase = 0
-
-    def set_progress(self, pct: int, status: str = "", anim_ms: int = 400):
-        self._progress = max(0, min(100, pct))
-        if status:
-            self._status = status
-        self._status_lbl.setText(self._status)
-        self._pct_lbl.setText(f"{self._progress}%")
-        # Animate bar smoothly
-        self._progress_bar.set_value(self._progress, duration_ms=anim_ms)
-
-    def finish_and_hide(self, on_done=None):
-        """Animate bar to 100%, show 'Launching', then fade the overlay out."""
-        self._done = True
-        
-        # 1. Force the progress bar to 100% immediately
-        self.set_progress(100, "Ready to play", anim_ms=300)
-        
-        # 2. Show the 'Launching' label
-        self._done_lbl.setVisible(True)
-        self._shimmer_timer.stop()
-        def _do_fade():
-            self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
-            self._fade_anim.setDuration(1000) # Increased duration for smoother feel
-            self._fade_anim.setStartValue(1.0)
-            self._fade_anim.setEndValue(0.0)
-            self._fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
-            if on_done:
-                self._fade_anim.finished.connect(on_done)
-            self._fade_anim.start()
-
-        # 3. Increase this delay. 
-        # 2000ms (2 seconds) gives the user time to actually see the '100%' state.
-        # QTimer.singleShot(1000, _do_fade)
-
-    def _shimmer(self):
-        self._shimmer_phase = (self._shimmer_phase + 1) % 2
-        colors = ["#eeedfe", "#afa9ec"]
-        for child in self.findChildren(QLabel):
-            if child.text() == "GAMEVAULT":
-                c = colors[self._shimmer_phase]
-                child.setStyleSheet(
-                    f"font-size: 38px; font-weight: 700; letter-spacing: 10px; "
-                    f"color: {c}; background: transparent; font-family: 'Consolas', monospace;"
-                )
-                break
+    
+    # Delay before fading out (3000ms = 3 seconds)
+    QTimer.singleShot(3000, _do_fade)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
