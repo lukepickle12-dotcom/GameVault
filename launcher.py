@@ -267,7 +267,7 @@ def mark_ready(self):
 
         # 3. Increase this delay. 
         # 2000ms (2 seconds) gives the user time to actually see the '100%' state.
-        QTimer.singleShot(2000, _do_fade)
+        QTimer.singleShot(4000, _do_fade)
 
     def _shimmer(self):
         self._shimmer_phase = (self._shimmer_phase + 1) % 2
