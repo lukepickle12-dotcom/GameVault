@@ -109,7 +109,7 @@ def finish_and_hide(self, on_done=None):
 
     def _do_fade():
         self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
-        self._fade_anim.setDuration(400)  # slightly faster fade
+        # self._fade_anim.setDuration(400)  # slightly faster fade
         self._fade_anim.setStartValue(1.0)
         self._fade_anim.setEndValue(0.0)
         self._fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
