@@ -104,7 +104,7 @@ def finish_and_hide(self, on_done=None):
     self._done = True
     remaining_pct = 100 - self._progress_bar.fillPct
     # make final fill take proportional time to remaining
-    final_duration = max(200, int(400 * (remaining_pct / 100)))
+    final_duration = max(400, int(400 * (remaining_pct / 100)))
     self._progress_bar.set_value(100, duration_ms=final_duration)
 
     self._done_lbl.setVisible(True)
@@ -120,9 +120,6 @@ def finish_and_hide(self, on_done=None):
             self._fade_anim.finished.connect(on_done)
         self._fade_anim.finished.connect(self.hide)
         self._fade_anim.start()
-
-    # start fade slightly after final fill begins
-    # QTimer.singleShot(final_duration // 2, _do_fade)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  DISCORD OAUTH2 CONFIG
