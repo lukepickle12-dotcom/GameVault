@@ -122,7 +122,7 @@ def finish_and_hide(self, on_done=None):
         self._fade_anim.start()
 
     # start fade slightly after final fill begins
-    QTimer.singleShot(final_duration // 2, _do_fade)
+    # QTimer.singleShot(final_duration // 2, _do_fade)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  DISCORD OAUTH2 CONFIG
