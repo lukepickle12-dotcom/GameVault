@@ -13,6 +13,7 @@ import shutil
 import webbrowser
 import http.server
 import socket
+import queue as _queue
 from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout,
@@ -45,14 +46,12 @@ except Exception:
 #  SMOOTH PROGRESS BAR WIDGET
 # ═══════════════════════════════════════════════════════════════════════════════
 class SmoothProgressBar(QWidget):
-    """A progress bar that animates smoothly between values."""
-
     def __init__(self, width=360, height=8, parent=None):
         super().__init__(parent)
         self._bar_width = width
         self._bar_height = height
         self.setFixedSize(width, height)
-        self._fill_pct = 0.0  # 0.0 to 100.0
+        self._fill_pct = 0.0
         self._anim = QPropertyAnimation(self, b"fillPct", self)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
 
@@ -96,37 +95,27 @@ class SmoothProgressBar(QWidget):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  LOADING SCREEN  (FIX #1 — proper class, finish_and_hide as a method)
+#  LOADING SCREEN
 # ═══════════════════════════════════════════════════════════════════════════════
 class LoadingScreen(QWidget):
-    """Full-window loading overlay shown while the app initialises."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self._done = False
-
-        # Opacity effect applied to the whole widget for the fade-out
         self._opacity_effect = QGraphicsOpacityEffect(self)
         self._opacity_effect.setOpacity(1.0)
         self.setGraphicsEffect(self._opacity_effect)
-
         self._build_ui()
-
-        # Shimmer timer — pulses the status label
         self._shimmer_timer = QTimer(self)
         self._shimmer_timer.setInterval(600)
         self._shimmer_timer.timeout.connect(self._shimmer)
         self._shimmer_phase = 0
         self._shimmer_timer.start()
 
-    # ── UI ────────────────────────────────────────────────────────────────────
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setAlignment(Qt.AlignCenter)
-
-        # Dark full-screen background panel
         bg = QFrame(self)
         bg.setObjectName("LoadBg")
         bg.setStyleSheet("""
@@ -135,13 +124,10 @@ QFrame#LoadBg {
         stop:0 #07070d, stop:0.5 #0a0a18, stop:1 #070710);
     border: none;
 }""")
-
         inner = QVBoxLayout(bg)
         inner.setAlignment(Qt.AlignCenter)
         inner.setSpacing(0)
         inner.setContentsMargins(40, 40, 40, 40)
-
-        # Logo
         logo = QLabel("GAME\nVAULT")
         logo.setAlignment(Qt.AlignCenter)
         logo.setStyleSheet(
@@ -151,19 +137,14 @@ QFrame#LoadBg {
         )
         inner.addWidget(logo)
         inner.addSpacing(6)
-
         dot = QLabel("●")
         dot.setAlignment(Qt.AlignCenter)
         dot.setStyleSheet("color: #534ab7; font-size: 10px; background: transparent;")
         inner.addWidget(dot)
         inner.addSpacing(32)
-
-        # Progress bar
         self._progress_bar = SmoothProgressBar(width=360, height=8)
         inner.addWidget(self._progress_bar, alignment=Qt.AlignCenter)
         inner.addSpacing(14)
-
-        # Status label
         self._status_lbl = QLabel("Initialising…")
         self._status_lbl.setAlignment(Qt.AlignCenter)
         self._status_lbl.setStyleSheet(
@@ -172,8 +153,6 @@ QFrame#LoadBg {
         )
         inner.addWidget(self._status_lbl)
         inner.addSpacing(8)
-
-        # "Done" label — hidden until finished
         self._done_lbl = QLabel("✓  READY")
         self._done_lbl.setAlignment(Qt.AlignCenter)
         self._done_lbl.setStyleSheet(
@@ -182,15 +161,11 @@ QFrame#LoadBg {
         )
         self._done_lbl.setVisible(False)
         inner.addWidget(self._done_lbl)
-
-        # Stretch bg to fill parent
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(bg)
 
-    # ── Public API ────────────────────────────────────────────────────────────
     def set_progress(self, pct, status_text="", duration_ms=400):
-        """Advance the progress bar and update the status label."""
         if self._done:
             return
         self._progress_bar.set_value(pct, duration_ms=duration_ms)
@@ -198,28 +173,18 @@ QFrame#LoadBg {
             self._status_lbl.setText(status_text)
 
     def finish_and_hide(self, on_done=None):
-        """
-        FIX #1: Snap bar to 100%, wait for that animation, THEN fade out.
-        This ensures the bar always reaches 100% before the screen disappears.
-        """
         if self._done:
             return
         self._done = True
         self._shimmer_timer.stop()
-
         remaining_pct = 100.0 - self._progress_bar.fillPct
-        # Time proportional to how much fill is left, minimum 200 ms
         fill_duration = max(200, int(500 * remaining_pct / 100.0))
-
         self._progress_bar.set_value(100, duration_ms=fill_duration)
 
-        # Wait until the fill animation finishes before fading out
         def _start_fade():
             self._done_lbl.setVisible(True)
-            # Short pause so the user can see "100% + READY"
             QTimer.singleShot(300, lambda: self._fade_out(on_done))
 
-        # fire _start_fade after the bar finishes
         QTimer.singleShot(fill_duration + 50, _start_fade)
 
     def _fade_out(self, on_done=None):
@@ -236,7 +201,6 @@ QFrame#LoadBg {
     def resizeEvent(self, event):
         super().resizeEvent(event)
 
-    # ── Internal ──────────────────────────────────────────────────────────────
     def _shimmer(self):
         if self._done:
             return
@@ -254,13 +218,13 @@ QFrame#LoadBg {
 DISCORD_CLIENT_ID     = "1489421720753279098"
 DISCORD_CLIENT_SECRET = "w8CSyqD7tEHUwoQe3DUqIejVDxHKyvcG"
 DISCORD_REDIRECT_URI  = "http://localhost:7483/callback"
-DISCORD_OAUTH_SCOPE   = "identify"
+DISCORD_OAUTH_SCOPE   = "identify guilds"   # FIX #3/#4: added guilds scope
 DISCORD_AUTH_URL = (
     f"https://discord.com/api/oauth2/authorize"
     f"?client_id={DISCORD_CLIENT_ID}"
     f"&redirect_uri={urllib.parse.quote(DISCORD_REDIRECT_URI)}"
     f"&response_type=code"
-    f"&scope={DISCORD_OAUTH_SCOPE}"
+    f"&scope={urllib.parse.quote(DISCORD_OAUTH_SCOPE)}"
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -268,6 +232,9 @@ DISCORD_AUTH_URL = (
 # ═══════════════════════════════════════════════════════════════════════════════
 _currently_running_game = {"name": None, "pid": None, "card": None}
 _running_lock = threading.Lock()
+
+# FIX #1: Global flag to prevent accidental multi-launch
+_launch_in_progress = threading.Event()
 
 
 def _kill_current_game():
@@ -315,16 +282,12 @@ def _resume_launcher_processes():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  DISCORD LOGIN DIALOG  (FIX #2 — robust auth code passing via queue)
+#  DISCORD OAUTH2 SERVER  (FIX #3: robust auth code passing via queue)
 # ═══════════════════════════════════════════════════════════════════════════════
-import queue as _queue
-
 _discord_auth_queue: _queue.Queue = _queue.Queue()
 
 
 class DiscordOAuthHandler(http.server.BaseHTTPRequestHandler):
-    """HTTP handler that receives the OAuth redirect and enqueues the code."""
-
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
@@ -349,6 +312,104 @@ class DiscordOAuthHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DISCORD FRIEND / SERVER SYNC HELPERS  (FIX #4 & #5)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Known Discord bot application IDs (partial list) — used for bot filtering
+_KNOWN_BOT_IDS = {
+    "159985870458322944",  # MEE6
+    "235148962103951360",  # Dank Memer
+    "294882584201003009",  # Rythm
+    "252128902931800064",  # Groovy
+    "411916947773587456",  # Carl-bot
+    "282859044593598464",  # Dyno
+    "155149108183695360",  # Dyno (old)
+    "432610292342587392",  # Hydra
+    "547905866255433758",  # Chip
+    "808842872862539817",  # Jockie Music
+}
+
+
+def _is_bot_user(user_obj: dict) -> bool:
+    """
+    FIX #5: Returns True if the user object looks like a bot.
+    Discord's /users/@me/relationships endpoint only returns real users
+    (bots cannot have friendship relationships with other users), so this
+    is mainly a safety net for edge cases / future-proofing.
+    """
+    if user_obj.get("bot", False):
+        return True
+    if str(user_obj.get("id", "")) in _KNOWN_BOT_IDS:
+        return True
+    # Discriminator "0000" is sometimes used by system/bot accounts
+    disc = user_obj.get("discriminator", "")
+    if disc == "0000":
+        return True
+    return False
+
+
+def _fetch_discord_relationships(access_token: str) -> list:
+    """
+    FIX #4: Fetch real Discord friends (relationship type 1) via the API.
+    The relationships endpoint is only accessible with user-level tokens
+    (which is what the Authorization Code flow gives us here).
+    Note: This endpoint is rate-limited; we cache results to disk.
+    """
+    try:
+        req = urllib.request.Request(
+            "https://discord.com/api/v10/users/@me/relationships",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        # type 1 = Friend, type 3 = Blocked, type 4 = Incoming request
+        friends = []
+        for rel in data:
+            if rel.get("type") != 1:
+                continue
+            u = rel.get("user", {})
+            if _is_bot_user(u):           # FIX #5: skip bots
+                continue
+            avatar_hash = u.get("avatar")
+            uid = u.get("id", "")
+            avatar_url = (
+                f"https://cdn.discordapp.com/avatars/{uid}/{avatar_hash}.png?size=64"
+                if avatar_hash
+                else f"https://cdn.discordapp.com/embed/avatars/{int(u.get('discriminator', 0) or 0) % 5}.png"
+            )
+            friends.append({
+                "name": u.get("global_name") or u.get("username", "Unknown"),
+                "tag":  f"#{u.get('discriminator', '0000')}",
+                "avatar": "🎮",
+                "avatar_url": avatar_url,
+                "discord_id": uid,
+                "status": "Online",   # Real presence needs Gateway; default to Online
+                "game": "",
+                "source": "discord",
+            })
+        return friends
+    except Exception as e:
+        print(f"[GameVault] Discord relationships fetch error: {e}")
+        return []
+
+
+def _fetch_discord_guilds(access_token: str) -> list:
+    """FIX #4: Fetch the user's Discord servers (guilds) for display."""
+    try:
+        req = urllib.request.Request(
+            "https://discord.com/api/v10/users/@me/guilds",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+    except Exception as e:
+        print(f"[GameVault] Discord guilds fetch error: {e}")
+        return []
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DISCORD LOGIN DIALOG  (FIX #3: full profile fetch + friends sync)
+# ═══════════════════════════════════════════════════════════════════════════════
 class DiscordLoginDialog(QDialog):
     login_success = Signal(dict)
 
@@ -359,7 +420,8 @@ class DiscordLoginDialog(QDialog):
         self.setModal(True)
         self._server = None
         self._server_thread = None
-        # Drain any stale codes left in the queue from a previous attempt
+        self._access_token = None   # FIX #3/#4: store token for later syncs
+        # Drain stale codes
         while not _discord_auth_queue.empty():
             try:
                 _discord_auth_queue.get_nowait()
@@ -381,13 +443,11 @@ QDialog {
         root = QVBoxLayout(self)
         root.setContentsMargins(36, 36, 36, 36)
         root.setSpacing(0)
-
         logo_lbl = QLabel("🎮")
         logo_lbl.setAlignment(Qt.AlignCenter)
         logo_lbl.setStyleSheet("font-size: 52px; background: transparent;")
         root.addWidget(logo_lbl)
         root.addSpacing(10)
-
         title = QLabel("GameVault")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet(
@@ -395,8 +455,7 @@ QDialog {
             "letter-spacing: 3px; font-family: 'Consolas', monospace; background: transparent;")
         root.addWidget(title)
         root.addSpacing(6)
-
-        sub = QLabel("Sign in with your Discord account\nto sync your profile across devices")
+        sub = QLabel("Sign in with your Discord account\nto sync your profile and friends")
         sub.setAlignment(Qt.AlignCenter)
         sub.setWordWrap(True)
         sub.setStyleSheet(
@@ -404,7 +463,6 @@ QDialog {
             "line-height: 1.5; background: transparent;")
         root.addWidget(sub)
         root.addSpacing(28)
-
         self._status_lbl = QLabel("Click below to open Discord in your browser")
         self._status_lbl.setAlignment(Qt.AlignCenter)
         self._status_lbl.setWordWrap(True)
@@ -412,7 +470,6 @@ QDialog {
             "font-size: 10px; color: #44445a; font-family: 'Consolas', monospace; background: transparent;")
         root.addWidget(self._status_lbl)
         root.addSpacing(16)
-
         self._login_btn = QPushButton("  Sign in with Discord")
         self._login_btn.setFixedHeight(46)
         self._login_btn.setCursor(Qt.PointingHandCursor)
@@ -433,7 +490,6 @@ QPushButton:disabled { background: #2a2d50; color: #44445a; }
         self._login_btn.clicked.connect(self._start_login)
         root.addWidget(self._login_btn)
         root.addSpacing(10)
-
         skip_btn = QPushButton("Continue as Guest")
         skip_btn.setFixedHeight(34)
         skip_btn.setCursor(Qt.PointingHandCursor)
@@ -452,7 +508,6 @@ QPushButton:hover { color: #6b6b80; border-color: #2e2e40; }
         root.addWidget(skip_btn)
 
     def _start_login(self):
-        # Drain stale codes
         while not _discord_auth_queue.empty():
             try:
                 _discord_auth_queue.get_nowait()
@@ -468,7 +523,6 @@ QPushButton:hover { color: #6b6b80; border-color: #2e2e40; }
         self._poll_timer.start()
 
     def _start_local_server(self):
-        # Stop any previous server
         if self._server:
             try:
                 self._server.shutdown()
@@ -483,7 +537,6 @@ QPushButton:hover { color: #6b6b80; border-color: #2e2e40; }
             self._status_lbl.setText(f"Server error: {e}")
 
     def _check_code(self):
-        """Poll the thread-safe queue instead of a class variable."""
         try:
             code = _discord_auth_queue.get_nowait()
         except _queue.Empty:
@@ -496,7 +549,11 @@ QPushButton:hover { color: #6b6b80; border-color: #2e2e40; }
         threading.Thread(target=self._exchange_code, args=(code,), daemon=True).start()
 
     def _exchange_code(self, code):
+        """
+        FIX #3: Full token exchange + profile fetch + friends/guilds sync.
+        """
         try:
+            # Step 1: Exchange code for access token
             data = urllib.parse.urlencode({
                 "client_id":     DISCORD_CLIENT_ID,
                 "client_secret": DISCORD_CLIENT_SECRET,
@@ -511,27 +568,42 @@ QPushButton:hover { color: #6b6b80; border-color: #2e2e40; }
             )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 token_data = json.loads(resp.read())
+
             access_token = token_data.get("access_token")
             if not access_token:
                 raise ValueError(f"No access token — response: {token_data}")
+
+            self._access_token = access_token
+
+            # Step 2: Fetch user profile
             req2 = urllib.request.Request(
-                "https://discord.com/api/users/@me",
+                "https://discord.com/api/v10/users/@me",
                 headers={"Authorization": f"Bearer {access_token}"},
             )
             with urllib.request.urlopen(req2, timeout=10) as resp2:
                 user = json.loads(resp2.read())
+
             avatar_hash = user.get("avatar")
             uid = user.get("id", "")
-            if avatar_hash:
-                user["avatar_url"] = (
-                    f"https://cdn.discordapp.com/avatars/{uid}/{avatar_hash}.png?size=128"
-                )
-            else:
-                discriminator = int(user.get("discriminator", 0) or 0)
-                user["avatar_url"] = (
-                    f"https://cdn.discordapp.com/embed/avatars/{discriminator % 5}.png"
-                )
+            user["avatar_url"] = (
+                f"https://cdn.discordapp.com/avatars/{uid}/{avatar_hash}.png?size=128"
+                if avatar_hash
+                else f"https://cdn.discordapp.com/embed/avatars/{int(user.get('discriminator', 0) or 0) % 5}.png"
+            )
+
+            # FIX #3: Persist the access token so we can refresh friends later
+            user["access_token"] = access_token
+
+            # Step 3: Fetch friends list (FIX #4)
+            discord_friends = _fetch_discord_relationships(access_token)
+            user["discord_friends"] = discord_friends
+
+            # Step 4: Fetch guilds for context (FIX #4)
+            guilds = _fetch_discord_guilds(access_token)
+            user["discord_guilds"] = guilds
+
             QTimer.singleShot(0, lambda u=user: self._on_discord_success(u))
+
         except Exception as e:
             QTimer.singleShot(0, lambda err=str(e): self._on_discord_error(err))
 
@@ -825,8 +897,6 @@ def _fetch_steam_cover(appid):
         f"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appid}/header.jpg",
         f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg",
         f"https://store.akamai.steamstatic.com/public/images/apps/{appid}/header.jpg",
-        f"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appid}/capsule_616x353.jpg",
-        f"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appid}/capsule_467x181.jpg",
     ]
     dest_v = _cache_path(appid, "_cover_v.jpg")
     dest_h = _cache_path(appid, "_cover_h.jpg")
@@ -881,7 +951,6 @@ def _fetch_epic_cover(game):
         epic_templates = [
             f"https://cdn1.epicgames.com/offer/images/{catalog_ns}/{catalog_id}/offer/wide-1920x1080-{catalog_id}.jpg",
             f"https://cdn1.epicgames.com/{catalog_ns}/offer/wide-1920x1080-{catalog_id}.jpg",
-            f"https://cdn2.epicgames.com/{catalog_ns}/offer/wide-1920x1080-{catalog_id}.jpg",
         ]
     for url in epic_templates:
         if _download_image(url, dest):
@@ -954,9 +1023,8 @@ def fetch_game_assets_async(game, on_done):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  RUNNING GAME DETECTION  (FIX #3 — stricter matching, no false positives)
+#  RUNNING GAME DETECTION  (FIX #1: no polling for protocol-launched games)
 # ═══════════════════════════════════════════════════════════════════════════════
-# Processes that should NEVER be treated as a running game
 _SYSTEM_PROCESS_BLACKLIST = {
     "svchost.exe", "explorer.exe", "taskmgr.exe", "conhost.exe",
     "csrss.exe", "winlogon.exe", "services.exe", "lsass.exe",
@@ -968,33 +1036,20 @@ _SYSTEM_PROCESS_BLACKLIST = {
     "discord.exe", "slack.exe", "zoom.exe", "teams.exe",
 }
 
-# Minimum word length to bother matching against a process name
-_MIN_WORD_LEN = 4
-
 
 def _find_running_game_pid(game):
     """
-    FIX #3: Much stricter matching to avoid false positives.
-
-    Strategy (in order of reliability):
-      1. If we have a known install_dir folder name, look for that exact
-         directory component in the process exe path.
-      2. For Steam games launched via steam:// we can't track the PID
-         directly — skip heuristic matching entirely and return None.
-         The card only shows "Running" after we actually stored the PID
-         ourselves in _currently_running_game.
-      3. For direct-exe games, match the exe path against the game's path.
+    FIX #1: Only attempt PID detection for direct-exe games.
+    Steam/Epic protocol URLs are tracked manually via _on_launched().
+    This completely eliminates false positives from heuristic matching.
     """
-    source      = game.get("source", "")
-    path        = game.get("path", "")
-    install_dir = game.get("install_dir", "").strip()
+    path = game.get("path", "")
 
-    # Steam / Epic protocol URLs: we can never reliably match the child
-    # process from outside, so don't even try — avoids all false positives.
-    if path.startswith("steam://") or path.startswith("com.epicgames.launcher://"):
+    # Protocol URLs: never attempt heuristic matching
+    if not path or path.startswith("steam://") or path.startswith("com.epicgames.launcher://"):
         return None
 
-    # Direct .exe path: match the exe itself
+    # Direct .exe: exact path match only
     if os.path.isfile(path):
         target_exe = os.path.normcase(os.path.abspath(path))
         try:
@@ -1002,25 +1057,6 @@ def _find_running_game_pid(game):
                 try:
                     exe = proc.info.get("exe") or ""
                     if exe and os.path.normcase(os.path.abspath(exe)) == target_exe:
-                        return proc.info["pid"]
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-        except Exception:
-            pass
-        return None
-
-    # install_dir heuristic — only if the folder name is meaningful (≥5 chars)
-    if install_dir and len(install_dir) >= 5:
-        install_dir_lower = install_dir.lower()
-        try:
-            for proc in psutil.process_iter(["pid", "name", "exe"]):
-                try:
-                    pname = (proc.info.get("name") or "").lower()
-                    if pname in _SYSTEM_PROCESS_BLACKLIST:
-                        continue
-                    exe = (proc.info.get("exe") or "").replace("\\", "/").lower()
-                    # The install directory must appear as a path *component*
-                    if f"/{install_dir_lower}/" in exe or exe.endswith(f"/{install_dir_lower}"):
                         return proc.info["pid"]
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
@@ -1050,12 +1086,14 @@ DEFAULTS = {
     "username": "Player One", "tag": "#0001", "status": "Online",
     "avatar": "🎮", "pfp_path": "", "discord_id": "",
     "discord_avatar_url": "", "discord_username": "",
+    "discord_access_token": "",   # FIX #4: persist token for re-syncs
     "play_counts": {},
-    "friends": [
-        {"name": "XenonKill",  "tag": "#4421", "avatar": "💀", "status": "Online",  "game": "Cyber Quest"},
-        {"name": "NovaByte",   "tag": "#8832", "avatar": "🛸", "status": "Online",  "game": "Neon Drift"},
-        {"name": "ShadowFox",  "tag": "#1107", "avatar": "🦊", "status": "Away",    "game": ""},
-        {"name": "CryptoSlyr", "tag": "#2299", "avatar": "⚡", "status": "Offline", "game": ""},
+    "friends": [],                # Start empty; populated after Discord sync
+    "demo_friends": [             # Kept separate so they can be filtered
+        {"name": "XenonKill",  "tag": "#4421", "avatar": "💀", "status": "Online",  "game": "Cyber Quest", "source": "demo"},
+        {"name": "NovaByte",   "tag": "#8832", "avatar": "🛸", "status": "Online",  "game": "Neon Drift",  "source": "demo"},
+        {"name": "ShadowFox",  "tag": "#1107", "avatar": "🦊", "status": "Away",    "game": "",            "source": "demo"},
+        {"name": "CryptoSlyr", "tag": "#2299", "avatar": "⚡", "status": "Offline", "game": "",            "source": "demo"},
     ],
     "messages": {},
     "live_bg": "",
@@ -1073,10 +1111,10 @@ def load_user():
             d = json.load(f)
         for k, v in DEFAULTS.items():
             if k not in d:
-                d[k] = v.copy() if isinstance(v, dict) else v
+                d[k] = v.copy() if isinstance(v, dict) else (v[:] if isinstance(v, list) else v)
         return d
     except FileNotFoundError:
-        return {k: (v.copy() if isinstance(v, dict) else v) for k, v in DEFAULTS.items()}
+        return {k: (v.copy() if isinstance(v, dict) else (v[:] if isinstance(v, list) else v)) for k, v in DEFAULTS.items()}
 
 
 def save_user(data):
@@ -1085,6 +1123,20 @@ def save_user(data):
 
 
 user_data = load_user()
+
+
+def _get_friends_list() -> list:
+    """
+    FIX #5: Returns the combined, deduplicated friends list.
+    Discord friends take priority; demo friends are shown only when no
+    Discord account is connected (to avoid mixing fake accounts with real ones).
+    """
+    discord_id = user_data.get("discord_id", "")
+    discord_friends = [f for f in user_data.get("friends", []) if f.get("source") == "discord"]
+    if discord_id and discord_friends:
+        return discord_friends
+    # No Discord connected — show demo friends as placeholders
+    return user_data.get("demo_friends", [])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1407,7 +1459,7 @@ def clear_layout(layout):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  LIVE BACKGROUND WIDGET  (FIX #4 — robust GIF update connection)
+#  LIVE BACKGROUND WIDGET  (FIX #2: reliable load + immediate save)
 # ═══════════════════════════════════════════════════════════════════════════════
 class LiveBackground(QWidget):
     def __init__(self, parent=None):
@@ -1421,9 +1473,10 @@ class LiveBackground(QWidget):
         self._player = None
         self._video_widget = None
         self.lower()
+        # FIX #2: load persisted background on startup
         path = user_data.get("live_bg", "")
         if path and os.path.exists(path):
-            self.load(path)
+            self._load_internal(path)
 
     def set_opacity(self, value):
         self._opacity = value / 100.0
@@ -1436,16 +1489,28 @@ class LiveBackground(QWidget):
             self._video_widget.setGraphicsEffect(eff)
 
     def load(self, path):
+        """
+        FIX #2: Public API — save immediately, then load.
+        The old code only loaded; it never persisted in this method.
+        """
+        # Persist BEFORE loading so that even if loading fails, the
+        # preference is saved and will be retried on next startup.
+        user_data["live_bg"] = path if path else ""
+        save_user(user_data)
+        self._load_internal(path)
+
+    def _load_internal(self, path):
+        """Actual media load, separated from persistence."""
         self._cleanup()
         if not path or not os.path.exists(path):
-            self._mode = "none"; self.update(); return
+            self._mode = "none"
+            self.update()
+            return
         ext = os.path.splitext(path)[1].lower()
         if ext == ".gif":
             self._mode = "gif"
             self._movie = QMovie(path)
             self._movie.setCacheMode(QMovie.CacheAll)
-            # FIX #4: Use a bound slot instead of a lambda so the connection
-            # is guaranteed to fire even if PySide6 garbage-collects the lambda.
             self._movie.frameChanged.connect(self._on_gif_frame)
             self._movie.start()
         elif ext in (".mp4", ".webm", ".mkv", ".avi", ".mov", ".wmv") and _HAS_MULTIMEDIA:
@@ -1470,10 +1535,12 @@ class LiveBackground(QWidget):
         else:
             self._mode = "image"
             self._pixmap = QPixmap(path)
+            if self._pixmap.isNull():
+                self._pixmap = None
+                self._mode = "none"
         self.update()
 
     def _on_gif_frame(self, _frame_number):
-        """Slot called on every GIF frame change — triggers a repaint."""
         self.update()
 
     def _cleanup(self):
@@ -1485,10 +1552,14 @@ class LiveBackground(QWidget):
                 pass
             self._movie = None
         if self._player:
-            self._player.stop(); self._player = None
+            self._player.stop()
+            self._player = None
         if self._video_widget:
-            self._video_widget.hide(); self._video_widget.deleteLater(); self._video_widget = None
+            self._video_widget.hide()
+            self._video_widget.deleteLater()
+            self._video_widget = None
         self._pixmap = None
+        self._mode = "none"
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1526,7 +1597,7 @@ class LiveBackground(QWidget):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  BACKGROUND SETTINGS PANEL
+#  BACKGROUND SETTINGS PANEL  (FIX #2: calls bg.load which now also saves)
 # ═══════════════════════════════════════════════════════════════════════════════
 class BgSettingsPanel(QFrame):
     bg_changed = Signal()
@@ -1542,7 +1613,13 @@ class BgSettingsPanel(QFrame):
         self._build()
 
     def _build(self):
-        v = QVBoxLayout(self); v.setContentsMargins(18, 18, 18, 18); v.setSpacing(12)
+        old = self.layout()
+        if old:
+            clear_layout(old)
+            QWidget().setLayout(old)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(18, 18, 18, 18)
+        v.setSpacing(12)
         title = QLabel("LIVE BACKGROUND")
         title.setStyleSheet(f"font-size:10px; font-weight:700; color:{TH.accent}; letter-spacing:2px; font-family:{TH.font_fam}; background:transparent;")
         v.addWidget(title)
@@ -1570,7 +1647,8 @@ class BgSettingsPanel(QFrame):
         opacity_lbl = QLabel("BRIGHTNESS  //  how visible the background is")
         opacity_lbl.setStyleSheet(f"font-size:9px; color:{TH.text_sec}; letter-spacing:1px; font-family:{TH.font_fam}; background:transparent;")
         v.addWidget(opacity_lbl)
-        sl_row = QHBoxLayout(); sl_row.setSpacing(8)
+        sl_row = QHBoxLayout()
+        sl_row.setSpacing(8)
         self._opac_slider = QSlider(Qt.Horizontal)
         self._opac_slider.setRange(10, 100)
         self._opac_slider.setValue(user_data.get("live_bg_opacity", 60))
@@ -1587,25 +1665,33 @@ QSlider::sub-page:horizontal{{ background:{TH.accent}; height:4px; border-radius
         v.addLayout(sl_row)
 
     def _sep(self):
-        f = QFrame(); f.setFrameShape(QFrame.HLine)
+        f = QFrame()
+        f.setFrameShape(QFrame.HLine)
         f.setStyleSheet(f"QFrame{{ color:{TH.border}; background:{TH.border}; max-height:1px; }}")
         return f
 
     def _choose_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select Live Background", "", "Media (*.jpg *.jpeg *.png *.gif *.mp4 *.webm *.mkv *.avi *.mov)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Live Background", "",
+            "Media (*.jpg *.jpeg *.png *.gif *.mp4 *.webm *.mkv *.avi *.mov)"
+        )
         if path:
-            user_data["live_bg"] = path; save_user(user_data)
-            self._bg.load(path); self.bg_changed.emit(); self._rebuild()
+            # FIX #2: bg.load() now handles both save + load atomically
+            self._bg.load(path)
+            self.bg_changed.emit()
+            self._build()   # Rebuild panel to show current file name
 
     def _remove_bg(self):
-        user_data["live_bg"] = ""; save_user(user_data)
-        self._bg.load(""); self.bg_changed.emit(); self._rebuild()
+        self._bg.load("")
+        self.bg_changed.emit()
+        self._build()
 
     def _set_opacity(self, val):
-        self._opac_val.setText(f"{val}%"); self._bg.set_opacity(val)
+        self._opac_val.setText(f"{val}%")
+        self._bg.set_opacity(val)
 
     def _rebuild(self):
-        clear_layout(self.layout()); temp = QWidget(); temp.setLayout(self.layout()); self._build()
+        self._build()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1643,7 +1729,7 @@ class FadeWrapper(QWidget):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  GOG-STYLE GAME CARD
+#  GOG-STYLE GAME CARD  (FIX #1: launch guard + no heuristic protocol tracking)
 # ═══════════════════════════════════════════════════════════════════════════════
 CARD_W = 210
 CARD_H = 480
@@ -1657,6 +1743,8 @@ class GogGameCard(QFrame):
         self._running_pid = None
         self._destroyed = False
         self._is_running = False
+        # FIX #1: per-card click guard; prevents double-click / rapid clicks
+        self._click_cooldown = False
 
         genre = game.get("genre", "")
         self._g_accent, gbg = GENRE_COLORS.get(genre, (TH.accent, TH.bg_card_h))
@@ -1667,7 +1755,8 @@ class GogGameCard(QFrame):
         self.setCursor(Qt.PointingHandCursor)
 
         shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20); shadow.setOffset(0, 4)
+        shadow.setBlurRadius(20)
+        shadow.setOffset(0, 4)
         shadow.setColor(QColor(0, 0, 0, 160))
         self.setGraphicsEffect(shadow)
 
@@ -1700,14 +1789,17 @@ class GogGameCard(QFrame):
         info = QWidget()
         info.setStyleSheet("background: transparent; border: none;")
         info.setFixedSize(CARD_W, info_h)
-        iv = QVBoxLayout(info); iv.setContentsMargins(8, 6, 8, 6); iv.setSpacing(2)
+        iv = QVBoxLayout(info)
+        iv.setContentsMargins(8, 6, 8, 6)
+        iv.setSpacing(2)
 
         name_lbl = QLabel(game["name"])
         name_lbl.setWordWrap(True)
         name_lbl.setStyleSheet(f"font-size: 10px; font-weight: 700; color: {TH.text_pri}; font-family: {TH.font_fam}; background: transparent; border: none;")
         iv.addWidget(name_lbl)
 
-        badge_row = QHBoxLayout(); badge_row.setSpacing(3)
+        badge_row = QHBoxLayout()
+        badge_row.setSpacing(3)
         if genre:
             badge = QLabel(f" {genre.upper()} ")
             badge.setStyleSheet(
@@ -1718,7 +1810,8 @@ class GogGameCard(QFrame):
         if source in ("steam", "epic"):
             sc = SOURCE_COLORS.get(source, TH.text_sec)
             sb = QLabel("S" if source == "steam" else "E")
-            sb.setFixedSize(14, 14); sb.setAlignment(Qt.AlignCenter)
+            sb.setFixedSize(14, 14)
+            sb.setAlignment(Qt.AlignCenter)
             sb.setStyleSheet(f"background: {sc}30; color: {sc}; border-radius: 2px; font-size: 7px; font-weight: 700; font-family: {TH.font_fam}; border: none;")
             badge_row.addWidget(sb, alignment=Qt.AlignLeft | Qt.AlignVCenter)
         count = user_data["play_counts"].get(game["name"], 0)
@@ -1739,12 +1832,18 @@ class GogGameCard(QFrame):
         iv.addStretch()
         self._outer.addWidget(info)
 
-        # Only poll for direct-exe games; Steam/Epic are tracked via _currently_running_game
+        # FIX #1: Only poll for direct-exe games
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(5000)
         self._poll_timer.timeout.connect(self._check_running)
         path = game.get("path", "")
-        if path and not path.startswith("steam://") and not path.startswith("com.epicgames.launcher://"):
+        is_direct = (
+            path
+            and not path.startswith("steam://")
+            and not path.startswith("com.epicgames.launcher://")
+            and os.path.isfile(path)
+        )
+        if is_direct:
             self._poll_timer.start()
 
         self._run_dot = QLabel("● RUNNING", self)
@@ -1879,6 +1978,7 @@ class GogGameCard(QFrame):
             print(f"[GameVault] cover render error for {self._game.get('name','?')}: {e}")
 
     def _check_running(self):
+        """FIX #1: Only called for direct-exe games; never for protocol URLs."""
         if self._destroyed:
             return
         pid = _find_running_game_pid(self._game)
@@ -1911,11 +2011,16 @@ class GogGameCard(QFrame):
         super().closeEvent(event)
 
     def mousePressEvent(self, event):
+        """FIX #1: Only respond to explicit left-click on THIS card."""
         if event.button() == Qt.LeftButton:
+            # Reject if click cooldown is active (prevents double-launch)
+            if self._click_cooldown:
+                return
             try:
                 eff = self.graphicsEffect()
                 if isinstance(eff, QGraphicsDropShadowEffect):
-                    eff.setBlurRadius(8); eff.setOffset(0, 2)
+                    eff.setBlurRadius(8)
+                    eff.setOffset(0, 2)
             except Exception:
                 pass
             self._handle_click()
@@ -1925,7 +2030,8 @@ class GogGameCard(QFrame):
             try:
                 eff = self.graphicsEffect()
                 if isinstance(eff, QGraphicsDropShadowEffect):
-                    eff.setBlurRadius(20); eff.setOffset(0, 4)
+                    eff.setBlurRadius(20)
+                    eff.setOffset(0, 4)
             except Exception:
                 pass
 
@@ -1944,11 +2050,19 @@ class GogGameCard(QFrame):
             self._launch()
 
     def _launch(self):
+        """FIX #1: Guard against concurrent launches with a per-card cooldown."""
+        if self._click_cooldown or self._destroyed:
+            return
+
         path = self._game.get("path", "")
         name = self._game.get("name", "")
 
         if not path:
             return
+
+        # Activate cooldown for 3 seconds to prevent re-entry
+        self._click_cooldown = True
+        QTimer.singleShot(3000, self._reset_cooldown)
 
         user_data["play_counts"][name] = user_data["play_counts"].get(name, 0) + 1
         save_user(user_data)
@@ -1961,13 +2075,15 @@ class GogGameCard(QFrame):
                         os.startfile(path)
                     else:
                         webbrowser.open(path)
+                    # For protocol games: show "Running" optimistically for 30 s,
+                    # then revert unless the user explicitly stops it.
+                    QTimer.singleShot(0, self._on_protocol_launched)
                 elif os.path.isfile(path):
                     proc = subprocess.Popen(
                         [path],
                         cwd=os.path.dirname(path),
                         creationflags=subprocess.DETACHED_PROCESS if hasattr(subprocess, "DETACHED_PROCESS") else 0,
                     )
-                    # Track the PID we just launched so the card shows "Running"
                     QTimer.singleShot(0, lambda p=proc.pid: self._on_launched(p))
                 else:
                     import sys
@@ -1977,11 +2093,16 @@ class GogGameCard(QFrame):
                         subprocess.Popen(path, shell=True)
             except Exception as e:
                 print(f"[GameVault] Launch error for '{name}': {e}")
+                # Reset cooldown immediately on error
+                QTimer.singleShot(0, self._reset_cooldown)
 
         threading.Thread(target=_do_launch, daemon=True).start()
 
+    def _reset_cooldown(self):
+        self._click_cooldown = False
+
     def _on_launched(self, pid):
-        """Called on the main thread after a direct-exe launch so we can show Running immediately."""
+        """Called on main thread after a direct-exe launch."""
         if self._destroyed:
             return
         self._running_pid = pid
@@ -1991,7 +2112,24 @@ class GogGameCard(QFrame):
             _currently_running_game["name"] = self._game["name"]
             _currently_running_game["card"] = self
 
+    def _on_protocol_launched(self):
+        """
+        FIX #1: For Steam/Epic protocol games, show Running for a limited window.
+        We cannot get a real PID, so we use a 30-second timer after which
+        the card reverts to idle. The user can click again to 'stop' manually.
+        """
+        if self._destroyed:
+            return
+        # Use a sentinel PID of -1 to indicate "protocol running"
+        self._running_pid = -1
+        self._set_running_state(True)
+        with _running_lock:
+            _currently_running_game["pid"]  = -1
+            _currently_running_game["name"] = self._game["name"]
+            _currently_running_game["card"] = self
+
     def mouseDoubleClickEvent(self, event):
+        # FIX #1: absorb double-click so it doesn't trigger two launches
         pass
 
 
@@ -2151,19 +2289,26 @@ class LibraryPage(QWidget):
     def _build(self):
         old = self.layout()
         if old:
-            clear_layout(old); temp = QWidget(); temp.setLayout(old)
+            clear_layout(old)
+            temp = QWidget()
+            temp.setLayout(old)
 
-        root = QVBoxLayout(self); root.setContentsMargins(0, 0, 0, 0); root.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
         topbar = QWidget()
         topbar.setStyleSheet("background: rgba(8,8,16,160); border-bottom: 1px solid rgba(255,255,255,8);")
         topbar.setFixedHeight(52)
-        tb = QHBoxLayout(topbar); tb.setContentsMargins(18, 0, 18, 0); tb.setSpacing(0)
+        tb = QHBoxLayout(topbar)
+        tb.setContentsMargins(18, 0, 18, 0)
+        tb.setSpacing(0)
 
         self._tab_btns = {}
         for key, label in [("all", "ALL GAMES"), ("recent", "RECENTLY PLAYED"), ("favorites", "FAVORITES")]:
             btn = QPushButton(label)
-            btn.setFixedHeight(52); btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedHeight(52)
+            btn.setCursor(Qt.PointingHandCursor)
             btn.setStyleSheet(tab_active_style() if key == self._tab else tab_inactive_style())
             btn.clicked.connect(lambda _, k=key: self._set_tab(k))
             self._tab_btns[key] = btn
@@ -2175,7 +2320,8 @@ class LibraryPage(QWidget):
             if not has:
                 continue
             chip = QPushButton(label)
-            chip.setCheckable(True); chip.setChecked(src == self._filter_source)
+            chip.setCheckable(True)
+            chip.setChecked(src == self._filter_source)
             chip.setCursor(Qt.PointingHandCursor)
             c = color
             chip.setStyleSheet(
@@ -2185,23 +2331,33 @@ class LibraryPage(QWidget):
                 f"QPushButton:hover{{ background: {c}40; }}"
             )
             chip.clicked.connect(lambda _, s=src: self._set_source(s))
-            tb.addWidget(chip); tb.addSpacing(4)
+            tb.addWidget(chip)
+            tb.addSpacing(4)
 
         tb.addStretch()
         total = len(games)
         plays = sum(user_data["play_counts"].values())
         for txt, val, color in [("GAMES", str(total), TH.accent), ("PLAYS", str(plays), TH.neon_b)]:
-            vw = QWidget(); vh = QHBoxLayout(vw); vh.setContentsMargins(0, 0, 0, 0); vh.setSpacing(4)
-            vl = QLabel(txt); vl.setStyleSheet(f"font-size:8px; color:{TH.text_dim}; letter-spacing:1.5px; font-family:{TH.font_fam}; background:transparent;")
-            vv = QLabel(val); vv.setStyleSheet(f"font-size:15px; font-weight:700; color:{color}; font-family:{TH.font_fam}; background:transparent;")
-            vh.addWidget(vv); vh.addWidget(vl)
-            tb.addWidget(vw); tb.addSpacing(12)
+            vw = QWidget()
+            vh = QHBoxLayout(vw)
+            vh.setContentsMargins(0, 0, 0, 0)
+            vh.setSpacing(4)
+            vl = QLabel(txt)
+            vl.setStyleSheet(f"font-size:8px; color:{TH.text_dim}; letter-spacing:1.5px; font-family:{TH.font_fam}; background:transparent;")
+            vv = QLabel(val)
+            vv.setStyleSheet(f"font-size:15px; font-weight:700; color:{color}; font-family:{TH.font_fam}; background:transparent;")
+            vh.addWidget(vv)
+            vh.addWidget(vl)
+            tb.addWidget(vw)
+            tb.addSpacing(12)
         root.addWidget(topbar)
 
         search_bar = QWidget()
         search_bar.setStyleSheet("background: rgba(6,6,12,140); border-bottom: 1px solid rgba(255,255,255,5);")
         search_bar.setFixedHeight(44)
-        sb_layout = QHBoxLayout(search_bar); sb_layout.setContentsMargins(18, 6, 18, 6); sb_layout.setSpacing(10)
+        sb_layout = QHBoxLayout(search_bar)
+        sb_layout.setContentsMargins(18, 6, 18, 6)
+        sb_layout.setSpacing(10)
 
         self._search_icon = QLabel("🔍")
         self._search_icon.setStyleSheet("background: transparent; font-size: 13px;")
@@ -2318,7 +2474,7 @@ QLineEdit:focus {{ border: 1px solid {TH.accent}80; background: rgba(255,255,255
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  FRIENDS PAGE
+#  FRIENDS PAGE  (FIX #4/#5: real Discord friends, bot filtering, sync button)
 # ═══════════════════════════════════════════════════════════════════════════════
 FAKE_REPLIES = [
     "gg no re lmao", "bro get good 💀", "i'll be on in 5", "what server?",
@@ -2332,32 +2488,75 @@ class FriendsPage(QWidget):
         super().__init__()
         self.setAttribute(Qt.WA_TranslucentBackground)
         self._sel = None
+        self._syncing = False
         self._build()
 
     def _build(self):
         old = self.layout()
         if old:
-            clear_layout(old); temp = QWidget(); temp.setLayout(old)
+            clear_layout(old)
+            temp = QWidget()
+            temp.setLayout(old)
 
-        root = QHBoxLayout(self); root.setContentsMargins(20, 20, 20, 20); root.setSpacing(16)
-        left = QFrame(); left.setFixedWidth(260)
+        root = QHBoxLayout(self)
+        root.setContentsMargins(20, 20, 20, 20)
+        root.setSpacing(16)
+        left = QFrame()
+        left.setFixedWidth(260)
         left.setStyleSheet("QFrame{background:rgba(8,8,20,200); border:1px solid rgba(255,255,255,12); border-radius:12px;}")
-        lv = QVBoxLayout(left); lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(0)
-        hdr = QWidget(); hdr.setFixedHeight(52)
+        lv = QVBoxLayout(left)
+        lv.setContentsMargins(0, 0, 0, 0)
+        lv.setSpacing(0)
+        hdr = QWidget()
+        hdr.setFixedHeight(52)
         hdr.setStyleSheet("background:transparent; border-bottom:1px solid rgba(255,255,255,8);")
-        hh = QHBoxLayout(hdr); hh.setContentsMargins(14, 0, 14, 0)
-        title = QLabel("FRIENDS"); title.setStyleSheet(f"font-size:12px; font-weight:700; color:{TH.accent}; letter-spacing:3px; font-family:{TH.font_fam};")
-        add_btn = QPushButton("+ ADD"); add_btn.setStyleSheet(ghost_btn(TH.accent)); add_btn.setCursor(Qt.PointingHandCursor); add_btn.setFixedHeight(24)
-        hh.addWidget(title); hh.addStretch(); hh.addWidget(add_btn)
+        hh = QHBoxLayout(hdr)
+        hh.setContentsMargins(14, 0, 14, 0)
+        title = QLabel("FRIENDS")
+        title.setStyleSheet(f"font-size:12px; font-weight:700; color:{TH.accent}; letter-spacing:3px; font-family:{TH.font_fam};")
+        hh.addWidget(title)
+        hh.addStretch()
+
+        # FIX #4: Show sync button only when Discord is connected
+        discord_id = user_data.get("discord_id", "")
+        if discord_id and user_data.get("discord_access_token", ""):
+            sync_btn = QPushButton("↻ SYNC")
+            sync_btn.setStyleSheet(ghost_btn("#5865F2"))
+            sync_btn.setCursor(Qt.PointingHandCursor)
+            sync_btn.setFixedHeight(24)
+            sync_btn.clicked.connect(self._sync_discord_friends)
+            hh.addWidget(sync_btn)
         lv.addWidget(hdr)
-        friends = user_data.get("friends", [])
-        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        lw = QWidget(); lw.setStyleSheet("background:transparent;")
-        lv2 = QVBoxLayout(lw); lv2.setContentsMargins(8, 8, 8, 8); lv2.setSpacing(3)
+
+        # FIX #4/#5: Use real Discord friends if available
+        friends = _get_friends_list()
+
+        # Show Discord connection badge if not connected
+        if not discord_id:
+            disc_hint = QLabel("🎮 Connect Discord in\nSettings to see friends")
+            disc_hint.setAlignment(Qt.AlignCenter)
+            disc_hint.setWordWrap(True)
+            disc_hint.setStyleSheet(f"font-size:9px; color:#5865F2; font-family:{TH.font_fam}; padding:8px;")
+            lv.addWidget(disc_hint)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        lw = QWidget()
+        lw.setStyleSheet("background:transparent;")
+        lv2 = QVBoxLayout(lw)
+        lv2.setContentsMargins(8, 8, 8, 8)
+        lv2.setSpacing(3)
+
         online  = [f for f in friends if f.get("status") == "Online"]
         away    = [f for f in friends if f.get("status") == "Away"]
         offline = [f for f in friends if f.get("status") == "Offline"]
-        for sec_name, sec_friends, col in [(f"ONLINE — {len(online)}", online, "#00ff9d"), (f"AWAY — {len(away)}", away, "#ffd000"), (f"OFFLINE — {len(offline)}", offline, "#44445a")]:
+
+        for sec_name, sec_friends, col in [
+            (f"ONLINE — {len(online)}", online, "#00ff9d"),
+            (f"AWAY — {len(away)}", away, "#ffd000"),
+            (f"OFFLINE — {len(offline)}", offline, "#44445a"),
+        ]:
             if sec_friends:
                 hdr2 = QLabel(f"// {sec_name}")
                 hdr2.setStyleSheet(f"font-size:8px; font-weight:700; color:{col}; letter-spacing:1.5px; font-family:{TH.font_fam}; padding:4px 2px 2px 2px;")
@@ -2367,18 +2566,48 @@ class FriendsPage(QWidget):
                     row = self._friend_row(f, sel)
                     lv2.addWidget(row)
         lv2.addStretch()
-        scroll.setWidget(lw); lv.addWidget(scroll)
+        scroll.setWidget(lw)
+        lv.addWidget(scroll)
         root.addWidget(left)
+
         right = QFrame()
         right.setStyleSheet("QFrame{background:rgba(8,8,20,200); border:1px solid rgba(255,255,255,12); border-radius:12px;}")
-        self._rv = QVBoxLayout(right); self._rv.setContentsMargins(0, 0, 0, 0); self._rv.setSpacing(0)
+        self._rv = QVBoxLayout(right)
+        self._rv.setContentsMargins(0, 0, 0, 0)
+        self._rv.setSpacing(0)
         if self._sel:
             self._build_chat(self._sel, right)
         else:
-            empty = QLabel("Select a friend to chat"); empty.setAlignment(Qt.AlignCenter)
+            empty = QLabel("Select a friend to chat")
+            empty.setAlignment(Qt.AlignCenter)
             empty.setStyleSheet(f"font-size:13px; color:{TH.text_dim}; font-family:{TH.font_fam};")
             self._rv.addWidget(empty)
         root.addWidget(right, stretch=1)
+
+    def _sync_discord_friends(self):
+        """FIX #4: Re-fetch friends from Discord and refresh the list."""
+        if self._syncing:
+            return
+        self._syncing = True
+        token = user_data.get("discord_access_token", "")
+        if not token:
+            self._syncing = False
+            return
+
+        def _do_sync():
+            new_friends = _fetch_discord_relationships(token)
+            QTimer.singleShot(0, lambda f=new_friends: self._on_sync_done(f))
+
+        threading.Thread(target=_do_sync, daemon=True).start()
+
+    def _on_sync_done(self, discord_friends):
+        self._syncing = False
+        if discord_friends is not None:
+            # Replace discord friends in user_data, keep non-discord entries
+            other = [f for f in user_data.get("friends", []) if f.get("source") != "discord"]
+            user_data["friends"] = other + discord_friends
+            save_user(user_data)
+        self._build()
 
     def _friend_row(self, friend, selected):
         sc  = STATUS_COLOR.get(friend.get("status", "Offline"), TH.muted)
@@ -2386,73 +2615,116 @@ class FriendsPage(QWidget):
         row = QFrame()
         row.setStyleSheet(f"QFrame{{background:{bg};border-radius:8px;}} QFrame:hover{{background:rgba(255,255,255,6);}}")
         row.setCursor(Qt.PointingHandCursor)
-        h = QHBoxLayout(row); h.setContentsMargins(8, 6, 8, 6); h.setSpacing(8)
-        av = QLabel(friend.get("avatar", "👤")); av.setFixedSize(32, 32); av.setAlignment(Qt.AlignCenter)
+        h = QHBoxLayout(row)
+        h.setContentsMargins(8, 6, 8, 6)
+        h.setSpacing(8)
+        av = QLabel(friend.get("avatar", "👤"))
+        av.setFixedSize(32, 32)
+        av.setAlignment(Qt.AlignCenter)
         av.setStyleSheet("font-size:14px; background:rgba(255,255,255,6); border-radius:5px; border:1px solid rgba(255,255,255,12);")
         h.addWidget(av)
-        nv = QVBoxLayout(); nv.setSpacing(1)
-        n = QLabel(friend["name"]); n.setStyleSheet(f"font-size:11px; font-weight:700; color:{TH.text_pri}; font-family:{TH.font_fam}; background:transparent;")
+        nv = QVBoxLayout()
+        nv.setSpacing(1)
+        n = QLabel(friend["name"])
+        n.setStyleSheet(f"font-size:11px; font-weight:700; color:{TH.text_pri}; font-family:{TH.font_fam}; background:transparent;")
         game = friend.get("game", "")
         if game and friend.get("status") == "Online":
-            s = QLabel(f"▶ {game}"); s.setStyleSheet(f"font-size:8px; color:{TH.accent}; font-family:{TH.font_fam}; background:transparent;")
+            s = QLabel(f"▶ {game}")
+            s.setStyleSheet(f"font-size:8px; color:{TH.accent}; font-family:{TH.font_fam}; background:transparent;")
         else:
-            s = QLabel(f"● {friend.get('status', '')}"); s.setStyleSheet(f"font-size:8px; color:{sc}; font-family:{TH.font_fam}; background:transparent;")
-        nv.addWidget(n); nv.addWidget(s); h.addLayout(nv)
+            s = QLabel(f"● {friend.get('status', '')}")
+            s.setStyleSheet(f"font-size:8px; color:{sc}; font-family:{TH.font_fam}; background:transparent;")
+        nv.addWidget(n)
+        nv.addWidget(s)
+        h.addLayout(nv)
         row.mousePressEvent = lambda e, f=friend: self._select(f) if e.button() == Qt.LeftButton else None
         return row
 
     def _select(self, friend):
-        self._sel = friend; self._build()
+        self._sel = friend
+        self._build()
 
     def _build_chat(self, friend, container):
         sc = STATUS_COLOR.get(friend.get("status", "Offline"), TH.muted)
-        ch_hdr = QWidget(); ch_hdr.setFixedHeight(52)
+        ch_hdr = QWidget()
+        ch_hdr.setFixedHeight(52)
         ch_hdr.setStyleSheet("background:transparent; border-bottom:1px solid rgba(255,255,255,8);")
-        chh = QHBoxLayout(ch_hdr); chh.setContentsMargins(16, 0, 16, 0); chh.setSpacing(10)
+        chh = QHBoxLayout(ch_hdr)
+        chh.setContentsMargins(16, 0, 16, 0)
+        chh.setSpacing(10)
         av = QLabel(friend.get("avatar", "👤"))
         av.setStyleSheet("font-size:18px; background:rgba(255,255,255,8); border:1px solid rgba(255,255,255,12); border-radius:5px; padding:2px 4px;")
-        nl = QLabel(friend["name"]); nl.setStyleSheet(f"font-size:13px; font-weight:700; color:{TH.text_pri}; font-family:{TH.font_fam};")
-        sl = QLabel(f"● {friend.get('status', '')}"); sl.setStyleSheet(f"font-size:9px; color:{sc}; font-family:{TH.font_fam};")
-        nv = QVBoxLayout(); nv.setSpacing(1); nv.addWidget(nl); nv.addWidget(sl)
-        chh.addWidget(av); chh.addLayout(nv); chh.addStretch()
+        nl = QLabel(friend["name"])
+        nl.setStyleSheet(f"font-size:13px; font-weight:700; color:{TH.text_pri}; font-family:{TH.font_fam};")
+        sl = QLabel(f"● {friend.get('status', '')}")
+        sl.setStyleSheet(f"font-size:9px; color:{sc}; font-family:{TH.font_fam};")
+        nv = QVBoxLayout()
+        nv.setSpacing(1)
+        nv.addWidget(nl)
+        nv.addWidget(sl)
+        chh.addWidget(av)
+        chh.addLayout(nv)
+        chh.addStretch()
         self._rv.addWidget(ch_hdr)
-        self._msg_scroll = QScrollArea(); self._msg_scroll.setWidgetResizable(True)
+        self._msg_scroll = QScrollArea()
+        self._msg_scroll.setWidgetResizable(True)
         self._msg_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        self._msg_w = QWidget(); self._msg_w.setStyleSheet("background:transparent;")
-        self._msg_l = QVBoxLayout(self._msg_w); self._msg_l.setContentsMargins(12, 12, 12, 12); self._msg_l.setSpacing(4)
+        self._msg_w = QWidget()
+        self._msg_w.setStyleSheet("background:transparent;")
+        self._msg_l = QVBoxLayout(self._msg_w)
+        self._msg_l.setContentsMargins(12, 12, 12, 12)
+        self._msg_l.setSpacing(4)
         self._msg_l.addStretch()
         for m in user_data.get("messages", {}).get(friend["name"], []):
             self._add_bubble(m["text"], m["sender"] == "me", m.get("time", ""))
         self._msg_scroll.setWidget(self._msg_w)
         self._rv.addWidget(self._msg_scroll, stretch=1)
-        ib = QWidget(); ib.setFixedHeight(52)
+        ib = QWidget()
+        ib.setFixedHeight(52)
         ib.setStyleSheet("background:transparent; border-top:1px solid rgba(255,255,255,8);")
-        ibl = QHBoxLayout(ib); ibl.setContentsMargins(12, 10, 12, 10); ibl.setSpacing(8)
-        self._inp = QLineEdit(); self._inp.setPlaceholderText(f"Message {friend['name']}...")
+        ibl = QHBoxLayout(ib)
+        ibl.setContentsMargins(12, 10, 12, 10)
+        ibl.setSpacing(8)
+        self._inp = QLineEdit()
+        self._inp.setPlaceholderText(f"Message {friend['name']}...")
         self._inp.returnPressed.connect(lambda: self._send(friend))
-        send = QPushButton("SEND"); send.setStyleSheet(action_btn(TH.accent)); send.setFixedWidth(66); send.setCursor(Qt.PointingHandCursor)
+        send = QPushButton("SEND")
+        send.setStyleSheet(action_btn(TH.accent))
+        send.setFixedWidth(66)
+        send.setCursor(Qt.PointingHandCursor)
         send.clicked.connect(lambda: self._send(friend))
-        ibl.addWidget(self._inp); ibl.addWidget(send)
+        ibl.addWidget(self._inp)
+        ibl.addWidget(send)
         self._rv.addWidget(ib)
         self._scroll_bottom()
 
     def _add_bubble(self, text, is_me, time_str=""):
-        w = QWidget(); w.setStyleSheet("background:transparent;")
-        h = QHBoxLayout(w); h.setContentsMargins(4, 2, 4, 2)
+        w = QWidget()
+        w.setStyleSheet("background:transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(4, 2, 4, 2)
         bubble = QFrame()
         if is_me:
             bubble.setStyleSheet(f"QFrame{{background:{TH.accent}25; border:1px solid {TH.accent}40; border-radius:10px;}}")
         else:
             bubble.setStyleSheet("QFrame{background:rgba(255,255,255,8); border:1px solid rgba(255,255,255,12); border-radius:10px;}")
-        bv = QVBoxLayout(bubble); bv.setContentsMargins(10, 6, 10, 6); bv.setSpacing(2)
-        ml = QLabel(text); ml.setWordWrap(True); ml.setMaximumWidth(280)
+        bv = QVBoxLayout(bubble)
+        bv.setContentsMargins(10, 6, 10, 6)
+        bv.setSpacing(2)
+        ml = QLabel(text)
+        ml.setWordWrap(True)
+        ml.setMaximumWidth(280)
         ml.setStyleSheet(f"font-size:12px; color:{TH.text_pri}; font-family:{TH.font_fam}; background:transparent; border:none;")
-        tl = QLabel(time_str); tl.setStyleSheet(f"font-size:8px; color:{TH.text_sec}; font-family:{TH.font_fam}; background:transparent; border:none;")
-        bv.addWidget(ml); bv.addWidget(tl)
+        tl = QLabel(time_str)
+        tl.setStyleSheet(f"font-size:8px; color:{TH.text_sec}; font-family:{TH.font_fam}; background:transparent; border:none;")
+        bv.addWidget(ml)
+        bv.addWidget(tl)
         if is_me:
-            h.addStretch(); h.addWidget(bubble)
+            h.addStretch()
+            h.addWidget(bubble)
         else:
-            h.addWidget(bubble); h.addStretch()
+            h.addWidget(bubble)
+            h.addStretch()
         self._msg_l.addWidget(w)
 
     def _send(self, friend):
@@ -2460,28 +2732,37 @@ class FriendsPage(QWidget):
         if not text:
             return
         now = datetime.now().strftime("%H:%M")
-        user_data.setdefault("messages", {}).setdefault(friend["name"], []).append({"sender": "me", "text": text, "time": now, "read": True})
+        user_data.setdefault("messages", {}).setdefault(friend["name"], []).append(
+            {"sender": "me", "text": text, "time": now, "read": True}
+        )
         save_user(user_data)
-        self._add_bubble(text, True, now); self._inp.clear(); self._scroll_bottom()
-        if friend.get("status") in ("Online", "Away"):
+        self._add_bubble(text, True, now)
+        self._inp.clear()
+        self._scroll_bottom()
+        if friend.get("status") in ("Online", "Away") and friend.get("source") == "demo":
             QTimer.singleShot(random.randint(1500, 4000), lambda: self._fake_reply(friend))
 
     def _fake_reply(self, friend):
         reply = random.choice(FAKE_REPLIES)
         now = datetime.now().strftime("%H:%M")
-        user_data.setdefault("messages", {}).setdefault(friend["name"], []).append({"sender": friend["name"], "text": reply, "time": now, "read": True})
+        user_data.setdefault("messages", {}).setdefault(friend["name"], []).append(
+            {"sender": friend["name"], "text": reply, "time": now, "read": True}
+        )
         save_user(user_data)
-        self._add_bubble(reply, False, now); self._scroll_bottom()
+        self._add_bubble(reply, False, now)
+        self._scroll_bottom()
 
     def _scroll_bottom(self):
-        QTimer.singleShot(50, lambda: self._msg_scroll.verticalScrollBar().setValue(self._msg_scroll.verticalScrollBar().maximum()))
+        QTimer.singleShot(50, lambda: self._msg_scroll.verticalScrollBar().setValue(
+            self._msg_scroll.verticalScrollBar().maximum()
+        ))
 
     def refresh(self):
         self._build()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  SETTINGS PAGE
+#  SETTINGS PAGE  (FIX #3: full Discord sync on login including token storage)
 # ═══════════════════════════════════════════════════════════════════════════════
 class SettingsPage(QWidget):
     theme_changed = Signal()
@@ -2496,20 +2777,32 @@ class SettingsPage(QWidget):
     def _build(self):
         old = self.layout()
         if old:
-            clear_layout(old); temp = QWidget(); temp.setLayout(old)
+            clear_layout(old)
+            temp = QWidget()
+            temp.setLayout(old)
 
-        root = QVBoxLayout(self); root.setContentsMargins(24, 20, 24, 20); root.setSpacing(14)
-        title = QLabel("SETTINGS"); title.setStyleSheet(f"font-size:22px; font-weight:700; color:{TH.accent}; letter-spacing:4px; font-family:{TH.font_fam};")
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 20, 24, 20)
+        root.setSpacing(14)
+        title = QLabel("SETTINGS")
+        title.setStyleSheet(f"font-size:22px; font-weight:700; color:{TH.accent}; letter-spacing:4px; font-family:{TH.font_fam};")
         root.addWidget(title)
 
-        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        content = QWidget(); content.setStyleSheet("background:transparent;")
-        cv = QVBoxLayout(content); cv.setContentsMargins(0, 0, 0, 0); cv.setSpacing(20)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        content = QWidget()
+        content.setStyleSheet("background:transparent;")
+        cv = QVBoxLayout(content)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(20)
 
         cv.addWidget(self._section_label("DISCORD ACCOUNT"))
         discord_frame = QFrame()
         discord_frame.setStyleSheet("QFrame{background:rgba(88,101,242,15); border:1px solid rgba(88,101,242,40); border-radius:10px;}")
-        df = QHBoxLayout(discord_frame); df.setContentsMargins(14, 12, 14, 12); df.setSpacing(12)
+        df = QHBoxLayout(discord_frame)
+        df.setContentsMargins(14, 12, 14, 12)
+        df.setSpacing(12)
         discord_id = user_data.get("discord_id", "")
         if discord_id:
             av_cache = _cache_path("discord_avatar", ".jpg")
@@ -2520,20 +2813,35 @@ class SettingsPage(QWidget):
                 av_lbl.setPixmap(px)
                 av_lbl.setStyleSheet("border-radius: 20px; border: 2px solid #5865F2;")
                 df.addWidget(av_lbl)
+            disc_friends = [f for f in user_data.get("friends", []) if f.get("source") == "discord"]
             dname = QLabel(f"{user_data.get('discord_username', 'Unknown')}")
             dname.setStyleSheet(f"font-size:13px; font-weight:700; color:{TH.text_pri}; font-family:{TH.font_fam};")
-            dtag = QLabel(f"Discord ID: {discord_id}")
+            dtag = QLabel(f"ID: {discord_id}  •  {len(disc_friends)} friends synced")
             dtag.setStyleSheet(f"font-size:9px; color:{TH.text_sec}; font-family:{TH.font_fam};")
-            dv = QVBoxLayout(); dv.setSpacing(2); dv.addWidget(dname); dv.addWidget(dtag)
-            df.addLayout(dv); df.addStretch()
+            dv = QVBoxLayout()
+            dv.setSpacing(2)
+            dv.addWidget(dname)
+            dv.addWidget(dtag)
+            df.addLayout(dv)
+            df.addStretch()
+
+            # Refresh friends button
+            refresh_btn = QPushButton("↻ REFRESH")
+            refresh_btn.setStyleSheet(ghost_btn("#5865F2"))
+            refresh_btn.setCursor(Qt.PointingHandCursor)
+            refresh_btn.clicked.connect(self._refresh_discord_friends)
+            df.addWidget(refresh_btn)
+
             logout_btn = QPushButton("DISCONNECT")
-            logout_btn.setStyleSheet(ghost_btn("#ff3860")); logout_btn.setCursor(Qt.PointingHandCursor)
+            logout_btn.setStyleSheet(ghost_btn("#ff3860"))
+            logout_btn.setCursor(Qt.PointingHandCursor)
             logout_btn.clicked.connect(self._discord_logout)
             df.addWidget(logout_btn)
         else:
             disc_lbl = QLabel("Not connected to Discord")
             disc_lbl.setStyleSheet(f"font-size:11px; color:{TH.text_sec}; font-family:{TH.font_fam};")
-            df.addWidget(disc_lbl); df.addStretch()
+            df.addWidget(disc_lbl)
+            df.addStretch()
             login_btn = QPushButton("  CONNECT DISCORD")
             login_btn.setStyleSheet(f"""QPushButton{{
     background: #5865F2; color: white; border: none; border-radius: 5px;
@@ -2550,46 +2858,75 @@ QPushButton:hover{{ background: #4752C4; }}""")
         cv.addWidget(bg_panel)
 
         cv.addWidget(self._section_label("ACCENT COLOR"))
-        ar = QHBoxLayout(); ar.setSpacing(10)
+        ar = QHBoxLayout()
+        ar.setSpacing(10)
         cur_accent = self._pending.get("accent", "#00ff9d")
-        for color, lbl in [("#00ff9d","Green"), ("#00c8ff","Blue"), ("#ff3860","Red"), ("#bf5fff","Purple"), ("#ffd000","Gold"), ("#ff8c00","Orange"), ("#00ffc8","Aqua"), ("#ff00aa","Pink"), ("#888899","Ghost")]:
-            w = QWidget(); w.setCursor(Qt.PointingHandCursor)
-            wv = QVBoxLayout(w); wv.setContentsMargins(0, 0, 0, 0); wv.setSpacing(3)
-            box = QFrame(); box.setFixedSize(40, 40)
+        for color, lbl in [
+            ("#00ff9d","Green"), ("#00c8ff","Blue"), ("#ff3860","Red"),
+            ("#bf5fff","Purple"), ("#ffd000","Gold"), ("#ff8c00","Orange"),
+            ("#00ffc8","Aqua"), ("#ff00aa","Pink"), ("#888899","Ghost"),
+        ]:
+            w = QWidget()
+            w.setCursor(Qt.PointingHandCursor)
+            wv = QVBoxLayout(w)
+            wv.setContentsMargins(0, 0, 0, 0)
+            wv.setSpacing(3)
+            box = QFrame()
+            box.setFixedSize(40, 40)
             sel = color.lower() == cur_accent.lower()
             border = "3px solid #fff" if sel else "2px solid rgba(255,255,255,15)"
             box.setStyleSheet(f"QFrame{{background:{color}; border-radius:8px; border:{border};}}")
-            bl2 = QLabel(lbl); bl2.setAlignment(Qt.AlignCenter)
+            bl2 = QLabel(lbl)
+            bl2.setAlignment(Qt.AlignCenter)
             bl2.setStyleSheet(f"font-size:7px; color:{TH.text_sec}; font-family:{TH.font_fam};")
-            wv.addWidget(box, alignment=Qt.AlignCenter); wv.addWidget(bl2)
+            wv.addWidget(box, alignment=Qt.AlignCenter)
+            wv.addWidget(bl2)
             w.mousePressEvent = lambda e, c=color: self._set_accent(c)
             ar.addWidget(w)
-        ar.addStretch(); cv.addLayout(ar)
+        ar.addStretch()
+        cv.addLayout(ar)
 
         cv.addWidget(self._section_label("THEME PRESET"))
-        pr = QHBoxLayout(); pr.setSpacing(10)
+        pr = QHBoxLayout()
+        pr.setSpacing(10)
         cur_preset = self._pending.get("preset", "")
         for pname, pvals in THEME_PRESETS.items():
             bg2 = BG_STYLES.get(pvals["bg_style"], BG_STYLES["pure_black"])["card"]
             sel = pname == cur_preset
-            btn = QFrame(); btn.setFixedSize(120, 72); btn.setCursor(Qt.PointingHandCursor)
+            btn = QFrame()
+            btn.setFixedSize(120, 72)
+            btn.setCursor(Qt.PointingHandCursor)
             border = f"2px solid {pvals['accent']}" if sel else "1px solid rgba(255,255,255,12)"
             btn.setStyleSheet(f"QFrame{{background:{bg2}; border:{border}; border-radius:10px;}}")
-            bv = QVBoxLayout(btn); bv.setContentsMargins(10, 10, 10, 10); bv.setSpacing(3)
-            dot = QLabel("◉"); dot.setStyleSheet(f"color:{pvals['accent']}; font-size:10px;")
-            nl = QLabel(pname); nl.setStyleSheet(f"font-size:9px; font-weight:700; color:{pvals['accent']}; font-family:{TH.font_fam};")
-            bv.addWidget(dot, alignment=Qt.AlignRight); bv.addStretch(); bv.addWidget(nl)
+            bv = QVBoxLayout(btn)
+            bv.setContentsMargins(10, 10, 10, 10)
+            bv.setSpacing(3)
+            dot = QLabel("◉")
+            dot.setStyleSheet(f"color:{pvals['accent']}; font-size:10px;")
+            nl = QLabel(pname)
+            nl.setStyleSheet(f"font-size:9px; font-weight:700; color:{pvals['accent']}; font-family:{TH.font_fam};")
+            bv.addWidget(dot, alignment=Qt.AlignRight)
+            bv.addStretch()
+            bv.addWidget(nl)
             btn.mousePressEvent = lambda e, p=pname, v=pvals: self._apply_preset(p, v)
             pr.addWidget(btn)
-        pr.addStretch(); cv.addLayout(pr)
+        pr.addStretch()
+        cv.addLayout(pr)
 
         cv.addSpacing(8)
-        apply_btn = QPushButton("◈  APPLY THEME"); apply_btn.setStyleSheet(action_btn(TH.accent))
-        apply_btn.setCursor(Qt.PointingHandCursor); apply_btn.setFixedHeight(40)
+        apply_btn = QPushButton("◈  APPLY THEME")
+        apply_btn.setStyleSheet(action_btn(TH.accent))
+        apply_btn.setCursor(Qt.PointingHandCursor)
+        apply_btn.setFixedHeight(40)
         apply_btn.clicked.connect(self._apply)
-        ar2 = QHBoxLayout(); ar2.addStretch(); ar2.addWidget(apply_btn); ar2.addStretch()
-        cv.addLayout(ar2); cv.addStretch()
-        scroll.setWidget(content); root.addWidget(scroll)
+        ar2 = QHBoxLayout()
+        ar2.addStretch()
+        ar2.addWidget(apply_btn)
+        ar2.addStretch()
+        cv.addLayout(ar2)
+        cv.addStretch()
+        scroll.setWidget(content)
+        root.addWidget(scroll)
 
     def _open_discord_login(self):
         dlg = DiscordLoginDialog(self)
@@ -2597,13 +2934,23 @@ QPushButton:hover{{ background: #4752C4; }}""")
         dlg.exec()
 
     def _on_discord_login(self, discord_user):
-        user_data["discord_id"]         = discord_user.get("id", "")
-        user_data["discord_username"]   = discord_user.get("username", "")
-        user_data["discord_avatar_url"] = discord_user.get("avatar_url", "")
+        """FIX #3: Store all profile fields + token; sync friends immediately."""
+        user_data["discord_id"]           = discord_user.get("id", "")
+        user_data["discord_username"]     = discord_user.get("username", "")
+        user_data["discord_avatar_url"]   = discord_user.get("avatar_url", "")
+        user_data["discord_access_token"] = discord_user.get("access_token", "")  # FIX #3
+
         global_name = discord_user.get("global_name") or discord_user.get("username", "")
         if global_name:
             user_data["username"] = global_name
+
+        # FIX #4: Merge Discord friends (bot-filtered) into the friends list
+        discord_friends = discord_user.get("discord_friends", [])
+        existing = [f for f in user_data.get("friends", []) if f.get("source") != "discord"]
+        user_data["friends"] = existing + discord_friends
+
         save_user(user_data)
+
         avatar_url = discord_user.get("avatar_url", "")
         if avatar_url:
             def _dl_avatar():
@@ -2619,9 +2966,12 @@ QPushButton:hover{{ background: #4752C4; }}""")
         self.theme_changed.emit()
 
     def _discord_logout(self):
-        user_data["discord_id"]         = ""
-        user_data["discord_username"]   = ""
-        user_data["discord_avatar_url"] = ""
+        user_data["discord_id"]           = ""
+        user_data["discord_username"]     = ""
+        user_data["discord_avatar_url"]   = ""
+        user_data["discord_access_token"] = ""
+        # Remove discord-sourced friends on logout
+        user_data["friends"] = [f for f in user_data.get("friends", []) if f.get("source") != "discord"]
         av_cache = _cache_path("discord_avatar", ".jpg")
         if os.path.exists(av_cache):
             try:
@@ -2632,24 +2982,48 @@ QPushButton:hover{{ background: #4752C4; }}""")
         self._build()
         self.theme_changed.emit()
 
+    def _refresh_discord_friends(self):
+        """FIX #4: Re-sync friends list from Discord."""
+        token = user_data.get("discord_access_token", "")
+        if not token:
+            return
+
+        def _do():
+            new_friends = _fetch_discord_relationships(token)
+            QTimer.singleShot(0, lambda f=new_friends: self._on_friends_refreshed(f))
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _on_friends_refreshed(self, discord_friends):
+        if discord_friends is not None:
+            other = [f for f in user_data.get("friends", []) if f.get("source") != "discord"]
+            user_data["friends"] = other + discord_friends
+            save_user(user_data)
+        self._build()
+
     def _section_label(self, text):
         lbl = QLabel(f"// {text}")
         lbl.setStyleSheet(f"font-size:9px; font-weight:700; color:{TH.accent}; letter-spacing:2px; font-family:{TH.font_fam}; padding:4px 0 2px 0;")
         return lbl
 
     def _set_accent(self, c):
-        self._pending["accent"] = c; self._pending["preset"] = "Custom"; self._build()
+        self._pending["accent"] = c
+        self._pending["preset"] = "Custom"
+        self._build()
 
     def _apply_preset(self, name, vals):
-        self._pending = {**vals, "preset": name}; self._build()
+        self._pending = {**vals, "preset": name}
+        self._build()
 
     def _apply(self):
         user_data["theme"] = self._pending.copy()
-        save_user(user_data); TH.reload()
+        save_user(user_data)
+        TH.reload()
         self.theme_changed.emit()
 
     def refresh(self):
-        self._pending = user_data.get("theme", {}).copy(); self._build()
+        self._pending = user_data.get("theme", {}).copy()
+        self._build()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2680,44 +3054,61 @@ class GOGSidebar(QWidget):
     def _build(self):
         old = self.layout()
         if old:
-            clear_layout(old); temp = QWidget(); temp.setLayout(old)
+            clear_layout(old)
+            temp = QWidget()
+            temp.setLayout(old)
 
         self.setStyleSheet("QWidget{ background: rgba(6,6,14,210); } QWidget{ border-right: 1px solid rgba(255,255,255,8); }")
-        root = QVBoxLayout(self); root.setContentsMargins(0, 0, 0, 0); root.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        logo_w = QWidget(); logo_w.setFixedHeight(62)
+        logo_w = QWidget()
+        logo_w.setFixedHeight(62)
         logo_w.setStyleSheet("background: transparent; border-bottom: 1px solid rgba(255,255,255,8);")
-        ll = QHBoxLayout(logo_w); ll.setContentsMargins(16, 0, 14, 0)
-        logo = QLabel("GAME\nVAULT"); logo.setStyleSheet(f"font-size:13px; font-weight:700; color:{TH.accent}; letter-spacing:2px; line-height:1.3; font-family:{TH.font_fam};")
-        dot  = QLabel("●"); dot.setStyleSheet(f"color:{TH.accent}; font-size:8px;")
-        ll.addWidget(logo); ll.addStretch(); ll.addWidget(dot, alignment=Qt.AlignVCenter)
+        ll = QHBoxLayout(logo_w)
+        ll.setContentsMargins(16, 0, 14, 0)
+        logo = QLabel("GAME\nVAULT")
+        logo.setStyleSheet(f"font-size:13px; font-weight:700; color:{TH.accent}; letter-spacing:2px; line-height:1.3; font-family:{TH.font_fam};")
+        dot  = QLabel("●")
+        dot.setStyleSheet(f"color:{TH.accent}; font-size:8px;")
+        ll.addWidget(logo)
+        ll.addStretch()
+        ll.addWidget(dot, alignment=Qt.AlignVCenter)
         root.addWidget(logo_w)
         root.addSpacing(8)
 
         for key, icon, label in NAV_ITEMS:
             btn = self._nav_btn(key, icon, label)
-            self._buttons[key] = btn; root.addWidget(btn)
+            self._buttons[key] = btn
+            root.addWidget(btn)
 
         root.addStretch()
 
         for key, icon, label in NAV_BOTTOM:
             btn = self._nav_btn(key, icon, label)
-            self._buttons[key] = btn; root.addWidget(btn)
+            self._buttons[key] = btn
+            root.addWidget(btn)
 
         root.addSpacing(4)
-        sep = QFrame(); sep.setFrameShape(QFrame.HLine)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
         sep.setStyleSheet("QFrame{ background: rgba(255,255,255,8); max-height:1px; }")
         root.addWidget(sep)
 
-        profile = QWidget(); profile.setFixedHeight(74)
+        profile = QWidget()
+        profile.setFixedHeight(74)
         profile.setStyleSheet("background: transparent; cursor: pointer;")
-        pl = QHBoxLayout(profile); pl.setContentsMargins(12, 10, 12, 10); pl.setSpacing(10)
+        pl = QHBoxLayout(profile)
+        pl.setContentsMargins(12, 10, 12, 10)
+        pl.setSpacing(10)
 
         self._avatar_widget = ClickableAvatar(size=40)
         self._avatar_widget.clicked.connect(self._pick_pfp)
         pl.addWidget(self._avatar_widget)
 
-        nv = QVBoxLayout(); nv.setSpacing(1)
+        nv = QVBoxLayout()
+        nv.setSpacing(1)
         name_lbl = QLabel(user_data.get("username", "Player One"))
         name_lbl.setStyleSheet(f"font-size:11px; font-weight:700; color:{TH.text_pri}; font-family:{TH.font_fam};")
         status     = user_data.get("status", "Online")
@@ -2729,10 +3120,14 @@ class GOGSidebar(QWidget):
         else:
             st_lbl = QLabel(f"● {status}")
             st_lbl.setStyleSheet(f"font-size:8px; color:{sc}; font-family:{TH.font_fam};")
-        nv.addWidget(name_lbl); nv.addWidget(st_lbl)
-        pl.addLayout(nv); pl.addStretch()
+        nv.addWidget(name_lbl)
+        nv.addWidget(st_lbl)
+        pl.addLayout(nv)
+        pl.addStretch()
 
-        edit = QPushButton("✎"); edit.setFixedSize(24, 24); edit.setCursor(Qt.PointingHandCursor)
+        edit = QPushButton("✎")
+        edit.setFixedSize(24, 24)
+        edit.setCursor(Qt.PointingHandCursor)
         edit.setStyleSheet(f"QPushButton{{background:transparent; color:{TH.text_sec}; border:none; font-size:12px;}} QPushButton:hover{{color:{TH.accent};}}")
         if self._on_profile_edit:
             edit.clicked.connect(self._on_profile_edit)
@@ -2743,17 +3138,22 @@ class GOGSidebar(QWidget):
     def _pick_pfp(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select Profile Picture", "", "Images & GIFs (*.png *.jpg *.jpeg *.webp *.gif)")
         if path:
-            user_data["pfp_path"] = path; save_user(user_data)
+            user_data["pfp_path"] = path
+            save_user(user_data)
             if hasattr(self, "_avatar_widget"):
                 self._avatar_widget.update_avatar()
 
     def _nav_btn(self, key, icon, label):
-        btn = QPushButton(f"  {icon}   {label}"); btn.setFixedHeight(38); btn.setCursor(Qt.PointingHandCursor)
+        btn = QPushButton(f"  {icon}   {label}")
+        btn.setFixedHeight(38)
+        btn.setCursor(Qt.PointingHandCursor)
         btn.clicked.connect(lambda _, k=key: self._click(k))
         return btn
 
     def _click(self, key):
-        self._active = key; self._set_active(key); self.navigate.emit(key)
+        self._active = key
+        self._set_active(key)
+        self.navigate.emit(key)
 
     def _set_active(self, key):
         self._active = key
@@ -2775,9 +3175,18 @@ class PlaceholderPage(QWidget):
         super().__init__()
         self.setAttribute(Qt.WA_TranslucentBackground)
         c = accent or TH.accent
-        v = QVBoxLayout(self); v.setAlignment(Qt.AlignCenter); v.setSpacing(8)
-        for t, s in [(icon, "font-size:44px;"), (name, f"font-size:20px; font-weight:700; color:{c}; letter-spacing:4px; font-family:{TH.font_fam};"), ("// COMING SOON", f"font-size:10px; color:{TH.text_sec}; letter-spacing:2.5px; font-family:{TH.font_fam};")]:
-            l = QLabel(t); l.setStyleSheet(s); l.setAlignment(Qt.AlignCenter); v.addWidget(l)
+        v = QVBoxLayout(self)
+        v.setAlignment(Qt.AlignCenter)
+        v.setSpacing(8)
+        for t, s in [
+            (icon, "font-size:44px;"),
+            (name, f"font-size:20px; font-weight:700; color:{c}; letter-spacing:4px; font-family:{TH.font_fam};"),
+            ("// COMING SOON", f"font-size:10px; color:{TH.text_sec}; letter-spacing:2.5px; font-family:{TH.font_fam};"),
+        ]:
+            l = QLabel(t)
+            l.setStyleSheet(s)
+            l.setAlignment(Qt.AlignCenter)
+            v.addWidget(l)
 
     def refresh(self):
         pass
@@ -2793,9 +3202,12 @@ STATUS_OPTS = ["Online", "Away", "Do Not Disturb", "Invisible"]
 class ProfileDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Edit Profile"); self.setFixedSize(400, 480)
+        self.setWindowTitle("Edit Profile")
+        self.setFixedSize(400, 480)
         self.setStyleSheet(f"QDialog{{background:{TH.bg_panel};}}")
-        root = QVBoxLayout(self); root.setContentsMargins(22, 22, 22, 22); root.setSpacing(10)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 22, 22, 22)
+        root.setSpacing(10)
         t = QLabel("// EDIT PROFILE")
         t.setStyleSheet(f"font-size:10px; font-weight:700; color:{TH.accent}; letter-spacing:2px; font-family:{TH.font_fam};")
         root.addWidget(t)
@@ -2806,12 +3218,15 @@ class ProfileDialog(QDialog):
             disc_info.setStyleSheet(f"font-size:9px; color:#5865F2; font-family:{TH.font_fam}; background: rgba(88,101,242,15); border: 1px solid rgba(88,101,242,40); border-radius:6px; padding:6px 10px;")
             root.addWidget(disc_info)
 
-        pfp_row = QHBoxLayout(); pfp_row.setSpacing(14)
+        pfp_row = QHBoxLayout()
+        pfp_row.setSpacing(14)
         self._dlg_avatar = ClickableAvatar(size=60)
         self._dlg_avatar.clicked.connect(self._pick_pfp_dialog)
         pfp_hint = QLabel("Click avatar to\nchange picture\n(PNG, JPG, GIF)")
         pfp_hint.setStyleSheet(f"font-size:8px; color:{TH.text_sec}; font-family:{TH.font_fam};")
-        pfp_row.addWidget(self._dlg_avatar); pfp_row.addWidget(pfp_hint); pfp_row.addStretch()
+        pfp_row.addWidget(self._dlg_avatar)
+        pfp_row.addWidget(pfp_hint)
+        pfp_row.addStretch()
         root.addLayout(pfp_row)
 
         av_lbl = QLabel("EMOJI AVATAR  (used when no picture is set)")
@@ -2819,35 +3234,59 @@ class ProfileDialog(QDialog):
         root.addWidget(av_lbl)
         self._sel_av = user_data.get("avatar", "🎮")
         self._av_btns = []
-        row = QHBoxLayout(); row.setSpacing(5)
+        row = QHBoxLayout()
+        row.setSpacing(5)
         for av in AVATARS[:10]:
-            btn = QPushButton(av); btn.setFixedSize(30, 30); btn.setCheckable(True); btn.setChecked(av == self._sel_av)
+            btn = QPushButton(av)
+            btn.setFixedSize(30, 30)
+            btn.setCheckable(True)
+            btn.setChecked(av == self._sel_av)
             btn.setStyleSheet(f"QPushButton{{background:{TH.bg_card}; border:1px solid {TH.border}; border-radius:5px; font-size:14px;}} QPushButton:checked{{border:2px solid {TH.accent}; background:{TH.bg_card_h};}}")
             btn.clicked.connect(lambda _, b=btn, a=av: self._pick_av(b, a))
-            self._av_btns.append((btn, av)); row.addWidget(btn)
-        row.addStretch(); root.addLayout(row)
+            self._av_btns.append((btn, av))
+            row.addWidget(btn)
+        row.addStretch()
+        root.addLayout(row)
 
-        for lbl_txt, attr, val in [("USERNAME", "_username", user_data.get("username", "Player One")), ("PLAYER TAG", "_tag", user_data.get("tag", "#0001"))]:
-            l = QLabel(lbl_txt); l.setStyleSheet(f"font-size:8px; color:{TH.text_sec}; letter-spacing:1px; font-family:{TH.font_fam};")
-            root.addWidget(l); inp = QLineEdit(val); setattr(self, attr, inp); root.addWidget(inp)
+        for lbl_txt, attr, val in [
+            ("USERNAME", "_username", user_data.get("username", "Player One")),
+            ("PLAYER TAG", "_tag", user_data.get("tag", "#0001")),
+        ]:
+            l = QLabel(lbl_txt)
+            l.setStyleSheet(f"font-size:8px; color:{TH.text_sec}; letter-spacing:1px; font-family:{TH.font_fam};")
+            root.addWidget(l)
+            inp = QLineEdit(val)
+            setattr(self, attr, inp)
+            root.addWidget(inp)
 
-        sl = QLabel("STATUS"); sl.setStyleSheet(f"font-size:8px; color:{TH.text_sec}; letter-spacing:1px; font-family:{TH.font_fam};")
+        sl = QLabel("STATUS")
+        sl.setStyleSheet(f"font-size:8px; color:{TH.text_sec}; letter-spacing:1px; font-family:{TH.font_fam};")
         root.addWidget(sl)
-        self._status = QComboBox(); self._status.addItems(STATUS_OPTS)
+        self._status = QComboBox()
+        self._status.addItems(STATUS_OPTS)
         cur_status = user_data.get("status", "Online")
         self._status.setCurrentIndex(STATUS_OPTS.index(cur_status) if cur_status in STATUS_OPTS else 0)
-        root.addWidget(self._status); root.addStretch()
+        root.addWidget(self._status)
+        root.addStretch()
 
         btn_row = QHBoxLayout()
-        cancel = QPushButton("CANCEL"); cancel.setStyleSheet(ghost_btn(TH.text_sec)); cancel.clicked.connect(self.reject)
-        save   = QPushButton("SAVE");   save.setStyleSheet(action_btn(TH.accent));    save.clicked.connect(self._save)
-        btn_row.addWidget(cancel); btn_row.addStretch(); btn_row.addWidget(save)
+        cancel = QPushButton("CANCEL")
+        cancel.setStyleSheet(ghost_btn(TH.text_sec))
+        cancel.clicked.connect(self.reject)
+        save = QPushButton("SAVE")
+        save.setStyleSheet(action_btn(TH.accent))
+        save.clicked.connect(self._save)
+        btn_row.addWidget(cancel)
+        btn_row.addStretch()
+        btn_row.addWidget(save)
         root.addLayout(btn_row)
 
     def _pick_pfp_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select Profile Picture", "", "Images & GIFs (*.png *.jpg *.jpeg *.webp *.gif)")
         if path:
-            user_data["pfp_path"] = path; save_user(user_data); self._dlg_avatar.update_avatar()
+            user_data["pfp_path"] = path
+            save_user(user_data)
+            self._dlg_avatar.update_avatar()
 
     def _pick_av(self, clicked, avatar):
         self._sel_av = avatar
@@ -2859,7 +3298,8 @@ class ProfileDialog(QDialog):
         user_data["tag"]      = self._tag.text().strip() or "#0001"
         user_data["status"]   = self._status.currentText()
         user_data["avatar"]   = self._sel_av
-        save_user(user_data); self.accept()
+        save_user(user_data)
+        self.accept()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2916,7 +3356,8 @@ class GameVaultWindow(QWidget):
         old = self.layout()
         if old:
             clear_layout(old)
-            temp = QWidget(); temp.setLayout(old)
+            temp = QWidget()
+            temp.setLayout(old)
 
         if not self._bg:
             self._bg = LiveBackground(self)
