@@ -56,7 +56,6 @@ class SmoothProgressBar(QWidget):
         self._anim = QPropertyAnimation(self, b"fillPct", self)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
 
-    # ── FIX #1: Proper PySide6 Property pattern ───────────────────────────────
     def _get_fillPct(self):
         return self._fill_pct
 
@@ -65,7 +64,6 @@ class SmoothProgressBar(QWidget):
         self.update()
 
     fillPct = Property(float, _get_fillPct, _set_fillPct)
-    # ─────────────────────────────────────────────────────────────────────────
 
     def set_value(self, pct, duration_ms=400):
         self._anim.stop()
@@ -79,11 +77,9 @@ class SmoothProgressBar(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         w = self._bar_width
         h = self._bar_height
-        # Track
         p.setBrush(QBrush(QColor("#2a1a40")))
         p.setPen(QPen(QColor("#534ab7"), 1))
         p.drawRoundedRect(0, 0, w, h, h // 2, h // 2)
-        # Fill
         fill_w = int(w * self._fill_pct / 100.0)
         if fill_w > 0:
             grad = QLinearGradient(0, 0, fill_w, 0)
@@ -92,7 +88,6 @@ class SmoothProgressBar(QWidget):
             grad.setColorAt(1.0, QColor("#7f77dd"))
             p.setPen(Qt.NoPen)
             p.setBrush(QBrush(grad))
-            # clip to rounded rect
             clip = QPainterPath()
             clip.addRoundedRect(QRectF(0, 0, w, h), h / 2, h / 2)
             p.setClipPath(clip)
@@ -100,19 +95,136 @@ class SmoothProgressBar(QWidget):
         p.end()
 
 
-def finish_and_hide(self, on_done=None):
-    self._done = True
-    remaining_pct = 100 - self._progress_bar.fillPct
-    # make final fill take proportional time to remaining
-    final_duration = max(200, int(400 * (remaining_pct / 100)))
-    self._progress_bar.set_value(100, duration_ms=final_duration)
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LOADING SCREEN  (FIX #1 — proper class, finish_and_hide as a method)
+# ═══════════════════════════════════════════════════════════════════════════════
+class LoadingScreen(QWidget):
+    """Full-window loading overlay shown while the app initialises."""
 
-    self._done_lbl.setVisible(True)
-    self._shimmer_timer.stop()
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self._done = False
 
-    def _do_fade():
+        # Opacity effect applied to the whole widget for the fade-out
+        self._opacity_effect = QGraphicsOpacityEffect(self)
+        self._opacity_effect.setOpacity(1.0)
+        self.setGraphicsEffect(self._opacity_effect)
+
+        self._build_ui()
+
+        # Shimmer timer — pulses the status label
+        self._shimmer_timer = QTimer(self)
+        self._shimmer_timer.setInterval(600)
+        self._shimmer_timer.timeout.connect(self._shimmer)
+        self._shimmer_phase = 0
+        self._shimmer_timer.start()
+
+    # ── UI ────────────────────────────────────────────────────────────────────
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setAlignment(Qt.AlignCenter)
+
+        # Dark full-screen background panel
+        bg = QFrame(self)
+        bg.setObjectName("LoadBg")
+        bg.setStyleSheet("""
+QFrame#LoadBg {
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+        stop:0 #07070d, stop:0.5 #0a0a18, stop:1 #070710);
+    border: none;
+}""")
+
+        inner = QVBoxLayout(bg)
+        inner.setAlignment(Qt.AlignCenter)
+        inner.setSpacing(0)
+        inner.setContentsMargins(40, 40, 40, 40)
+
+        # Logo
+        logo = QLabel("GAME\nVAULT")
+        logo.setAlignment(Qt.AlignCenter)
+        logo.setStyleSheet(
+            "font-size: 38px; font-weight: 700; color: #afa9ec; "
+            "letter-spacing: 8px; font-family: 'Consolas', monospace; "
+            "background: transparent; line-height: 1.2;"
+        )
+        inner.addWidget(logo)
+        inner.addSpacing(6)
+
+        dot = QLabel("●")
+        dot.setAlignment(Qt.AlignCenter)
+        dot.setStyleSheet("color: #534ab7; font-size: 10px; background: transparent;")
+        inner.addWidget(dot)
+        inner.addSpacing(32)
+
+        # Progress bar
+        self._progress_bar = SmoothProgressBar(width=360, height=8)
+        inner.addWidget(self._progress_bar, alignment=Qt.AlignCenter)
+        inner.addSpacing(14)
+
+        # Status label
+        self._status_lbl = QLabel("Initialising…")
+        self._status_lbl.setAlignment(Qt.AlignCenter)
+        self._status_lbl.setStyleSheet(
+            "font-size: 11px; color: #6b6b80; letter-spacing: 2px; "
+            "font-family: 'Consolas', monospace; background: transparent;"
+        )
+        inner.addWidget(self._status_lbl)
+        inner.addSpacing(8)
+
+        # "Done" label — hidden until finished
+        self._done_lbl = QLabel("✓  READY")
+        self._done_lbl.setAlignment(Qt.AlignCenter)
+        self._done_lbl.setStyleSheet(
+            "font-size: 10px; font-weight: 700; color: #00ff9d; "
+            "letter-spacing: 3px; font-family: 'Consolas', monospace; background: transparent;"
+        )
+        self._done_lbl.setVisible(False)
+        inner.addWidget(self._done_lbl)
+
+        # Stretch bg to fill parent
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(bg)
+
+    # ── Public API ────────────────────────────────────────────────────────────
+    def set_progress(self, pct, status_text="", duration_ms=400):
+        """Advance the progress bar and update the status label."""
+        if self._done:
+            return
+        self._progress_bar.set_value(pct, duration_ms=duration_ms)
+        if status_text:
+            self._status_lbl.setText(status_text)
+
+    def finish_and_hide(self, on_done=None):
+        """
+        FIX #1: Snap bar to 100%, wait for that animation, THEN fade out.
+        This ensures the bar always reaches 100% before the screen disappears.
+        """
+        if self._done:
+            return
+        self._done = True
+        self._shimmer_timer.stop()
+
+        remaining_pct = 100.0 - self._progress_bar.fillPct
+        # Time proportional to how much fill is left, minimum 200 ms
+        fill_duration = max(200, int(500 * remaining_pct / 100.0))
+
+        self._progress_bar.set_value(100, duration_ms=fill_duration)
+
+        # Wait until the fill animation finishes before fading out
+        def _start_fade():
+            self._done_lbl.setVisible(True)
+            # Short pause so the user can see "100% + READY"
+            QTimer.singleShot(300, lambda: self._fade_out(on_done))
+
+        # fire _start_fade after the bar finishes
+        QTimer.singleShot(fill_duration + 50, _start_fade)
+
+    def _fade_out(self, on_done=None):
         self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
-        self._fade_anim.setDuration(400)
+        self._fade_anim.setDuration(450)
         self._fade_anim.setStartValue(1.0)
         self._fade_anim.setEndValue(0.0)
         self._fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
@@ -120,6 +232,21 @@ def finish_and_hide(self, on_done=None):
             self._fade_anim.finished.connect(on_done)
         self._fade_anim.finished.connect(self.hide)
         self._fade_anim.start()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+
+    # ── Internal ──────────────────────────────────────────────────────────────
+    def _shimmer(self):
+        if self._done:
+            return
+        self._shimmer_phase = (self._shimmer_phase + 1) % 2
+        color = "#9a94e0" if self._shimmer_phase == 0 else "#6b6b80"
+        self._status_lbl.setStyleSheet(
+            f"font-size: 11px; color: {color}; letter-spacing: 2px; "
+            "font-family: 'Consolas', monospace; background: transparent;"
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  DISCORD OAUTH2 CONFIG
@@ -188,17 +315,22 @@ def _resume_launcher_processes():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  DISCORD LOGIN DIALOG
+#  DISCORD LOGIN DIALOG  (FIX #2 — robust auth code passing via queue)
 # ═══════════════════════════════════════════════════════════════════════════════
+import queue as _queue
+
+_discord_auth_queue: _queue.Queue = _queue.Queue()
+
+
 class DiscordOAuthHandler(http.server.BaseHTTPRequestHandler):
-    auth_code = None
+    """HTTP handler that receives the OAuth redirect and enqueues the code."""
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
         code = params.get("code", [None])[0]
         if code:
-            DiscordOAuthHandler.auth_code = code
+            _discord_auth_queue.put(code)
             self.send_response(200)
             self.send_header("Content-type", "text/html")
             self.end_headers()
@@ -227,8 +359,14 @@ class DiscordLoginDialog(QDialog):
         self.setModal(True)
         self._server = None
         self._server_thread = None
+        # Drain any stale codes left in the queue from a previous attempt
+        while not _discord_auth_queue.empty():
+            try:
+                _discord_auth_queue.get_nowait()
+            except _queue.Empty:
+                break
         self._poll_timer = QTimer(self)
-        self._poll_timer.setInterval(500)
+        self._poll_timer.setInterval(400)
         self._poll_timer.timeout.connect(self._check_code)
         self._build_ui()
 
@@ -314,20 +452,29 @@ QPushButton:hover { color: #6b6b80; border-color: #2e2e40; }
         root.addWidget(skip_btn)
 
     def _start_login(self):
-        if DISCORD_CLIENT_ID == "YOUR_DISCORD_CLIENT_ID":
-            self._status_lbl.setText("⚠ Set your Discord app credentials in launcher.py first!")
-            return
-        DiscordOAuthHandler.auth_code = None
+        # Drain stale codes
+        while not _discord_auth_queue.empty():
+            try:
+                _discord_auth_queue.get_nowait()
+            except _queue.Empty:
+                break
         self._start_local_server()
         webbrowser.open(DISCORD_AUTH_URL)
-        self._login_btn.setText("⟳  Waiting for Discord...")
+        self._login_btn.setText("⟳  Waiting for Discord…")
         self._login_btn.setEnabled(False)
-        self._status_lbl.setText("Complete the login in your browser...")
+        self._status_lbl.setText("Complete the login in your browser…")
         self._status_lbl.setStyleSheet(
             "font-size: 10px; color: #00ff9d; font-family: 'Consolas', monospace; background: transparent;")
         self._poll_timer.start()
 
     def _start_local_server(self):
+        # Stop any previous server
+        if self._server:
+            try:
+                self._server.shutdown()
+            except Exception:
+                pass
+            self._server = None
         try:
             self._server = http.server.HTTPServer(("localhost", 7483), DiscordOAuthHandler)
             self._server_thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -336,13 +483,16 @@ QPushButton:hover { color: #6b6b80; border-color: #2e2e40; }
             self._status_lbl.setText(f"Server error: {e}")
 
     def _check_code(self):
-        code = DiscordOAuthHandler.auth_code
-        if not code:
+        """Poll the thread-safe queue instead of a class variable."""
+        try:
+            code = _discord_auth_queue.get_nowait()
+        except _queue.Empty:
             return
         self._poll_timer.stop()
         if self._server:
-            self._server.shutdown()
-        self._status_lbl.setText("Fetching your Discord profile...")
+            threading.Thread(target=self._server.shutdown, daemon=True).start()
+            self._server = None
+        self._status_lbl.setText("Fetching your Discord profile…")
         threading.Thread(target=self._exchange_code, args=(code,), daemon=True).start()
 
     def _exchange_code(self, code):
@@ -363,7 +513,7 @@ QPushButton:hover { color: #6b6b80; border-color: #2e2e40; }
                 token_data = json.loads(resp.read())
             access_token = token_data.get("access_token")
             if not access_token:
-                raise ValueError("No access token in response")
+                raise ValueError(f"No access token — response: {token_data}")
             req2 = urllib.request.Request(
                 "https://discord.com/api/users/@me",
                 headers={"Authorization": f"Bearer {access_token}"},
@@ -390,7 +540,7 @@ QPushButton:hover { color: #6b6b80; border-color: #2e2e40; }
         self.accept()
 
     def _on_discord_error(self, err):
-        print(f"DISCORD ERROR: {err}") # <--- ADD THIS TO SEE THE REAL PROBLEM
+        print(f"[GameVault] DISCORD ERROR: {err}")
         self._login_btn.setText("  Sign in with Discord")
         self._login_btn.setEnabled(True)
         self._status_lbl.setText(f"Error: {err}")
@@ -804,27 +954,79 @@ def fetch_game_assets_async(game, on_done):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  RUNNING GAME DETECTION
+#  RUNNING GAME DETECTION  (FIX #3 — stricter matching, no false positives)
 # ═══════════════════════════════════════════════════════════════════════════════
+# Processes that should NEVER be treated as a running game
+_SYSTEM_PROCESS_BLACKLIST = {
+    "svchost.exe", "explorer.exe", "taskmgr.exe", "conhost.exe",
+    "csrss.exe", "winlogon.exe", "services.exe", "lsass.exe",
+    "python.exe", "python3.exe", "pythonw.exe",
+    "code.exe", "notepad.exe", "cmd.exe", "powershell.exe",
+    "steam.exe", "steamwebhelper.exe", "steamservice.exe",
+    "epicgameslauncher.exe", "epicwebhelper.exe",
+    "chrome.exe", "firefox.exe", "msedge.exe", "opera.exe",
+    "discord.exe", "slack.exe", "zoom.exe", "teams.exe",
+}
+
+# Minimum word length to bother matching against a process name
+_MIN_WORD_LEN = 4
+
+
 def _find_running_game_pid(game):
-    install_dir = game.get("install_dir", "").lower()
-    game_name   = game.get("name", "").lower()
-    if not install_dir and not game_name:
+    """
+    FIX #3: Much stricter matching to avoid false positives.
+
+    Strategy (in order of reliability):
+      1. If we have a known install_dir folder name, look for that exact
+         directory component in the process exe path.
+      2. For Steam games launched via steam:// we can't track the PID
+         directly — skip heuristic matching entirely and return None.
+         The card only shows "Running" after we actually stored the PID
+         ourselves in _currently_running_game.
+      3. For direct-exe games, match the exe path against the game's path.
+    """
+    source      = game.get("source", "")
+    path        = game.get("path", "")
+    install_dir = game.get("install_dir", "").strip()
+
+    # Steam / Epic protocol URLs: we can never reliably match the child
+    # process from outside, so don't even try — avoids all false positives.
+    if path.startswith("steam://") or path.startswith("com.epicgames.launcher://"):
         return None
-    try:
-        for proc in psutil.process_iter(["pid", "name", "exe"]):
-            try:
-                exe   = (proc.info.get("exe") or "").replace("\\", "/").lower()
-                pname = (proc.info.get("name") or "").lower()
-                if install_dir and install_dir in exe:
-                    return proc.info["pid"]
-                words = [w for w in re.split(r"\W+", game_name) if len(w) >= 3]
-                if words and any(w in pname for w in words):
-                    return proc.info["pid"]
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-    except Exception:
-        pass
+
+    # Direct .exe path: match the exe itself
+    if os.path.isfile(path):
+        target_exe = os.path.normcase(os.path.abspath(path))
+        try:
+            for proc in psutil.process_iter(["pid", "exe"]):
+                try:
+                    exe = proc.info.get("exe") or ""
+                    if exe and os.path.normcase(os.path.abspath(exe)) == target_exe:
+                        return proc.info["pid"]
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        except Exception:
+            pass
+        return None
+
+    # install_dir heuristic — only if the folder name is meaningful (≥5 chars)
+    if install_dir and len(install_dir) >= 5:
+        install_dir_lower = install_dir.lower()
+        try:
+            for proc in psutil.process_iter(["pid", "name", "exe"]):
+                try:
+                    pname = (proc.info.get("name") or "").lower()
+                    if pname in _SYSTEM_PROCESS_BLACKLIST:
+                        continue
+                    exe = (proc.info.get("exe") or "").replace("\\", "/").lower()
+                    # The install directory must appear as a path *component*
+                    if f"/{install_dir_lower}/" in exe or exe.endswith(f"/{install_dir_lower}"):
+                        return proc.info["pid"]
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        except Exception:
+            pass
+
     return None
 
 
@@ -1205,7 +1407,7 @@ def clear_layout(layout):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  LIVE BACKGROUND WIDGET
+#  LIVE BACKGROUND WIDGET  (FIX #4 — robust GIF update connection)
 # ═══════════════════════════════════════════════════════════════════════════════
 class LiveBackground(QWidget):
     def __init__(self, parent=None):
@@ -1241,7 +1443,10 @@ class LiveBackground(QWidget):
         if ext == ".gif":
             self._mode = "gif"
             self._movie = QMovie(path)
-            self._movie.frameChanged.connect(lambda _: self.update())
+            self._movie.setCacheMode(QMovie.CacheAll)
+            # FIX #4: Use a bound slot instead of a lambda so the connection
+            # is guaranteed to fire even if PySide6 garbage-collects the lambda.
+            self._movie.frameChanged.connect(self._on_gif_frame)
             self._movie.start()
         elif ext in (".mp4", ".webm", ".mkv", ".avi", ".mov", ".wmv") and _HAS_MULTIMEDIA:
             self._mode = "video"
@@ -1267,9 +1472,18 @@ class LiveBackground(QWidget):
             self._pixmap = QPixmap(path)
         self.update()
 
+    def _on_gif_frame(self, _frame_number):
+        """Slot called on every GIF frame change — triggers a repaint."""
+        self.update()
+
     def _cleanup(self):
         if self._movie:
-            self._movie.stop(); self._movie = None
+            self._movie.stop()
+            try:
+                self._movie.frameChanged.disconnect(self._on_gif_frame)
+            except Exception:
+                pass
+            self._movie = None
         if self._player:
             self._player.stop(); self._player = None
         if self._video_widget:
@@ -1525,10 +1739,13 @@ class GogGameCard(QFrame):
         iv.addStretch()
         self._outer.addWidget(info)
 
+        # Only poll for direct-exe games; Steam/Epic are tracked via _currently_running_game
         self._poll_timer = QTimer(self)
-        self._poll_timer.setInterval(4000)
+        self._poll_timer.setInterval(5000)
         self._poll_timer.timeout.connect(self._check_running)
-        self._poll_timer.start()
+        path = game.get("path", "")
+        if path and not path.startswith("steam://") and not path.startswith("com.epicgames.launcher://"):
+            self._poll_timer.start()
 
         self._run_dot = QLabel("● RUNNING", self)
         self._run_dot.setGeometry(6, 6, 90, 18)
@@ -1729,48 +1946,50 @@ class GogGameCard(QFrame):
     def _launch(self):
         path = self._game.get("path", "")
         name = self._game.get("name", "")
-        source = self._game.get("source", "")
 
         if not path:
             return
 
-        # Record the play count
         user_data["play_counts"][name] = user_data["play_counts"].get(name, 0) + 1
         save_user(user_data)
 
         def _do_launch():
             try:
-                # ── FIX #2: Correct launch logic for all game types ───────────
                 if path.startswith("steam://") or path.startswith("com.epicgames.launcher://"):
-                    # Steam & Epic protocol URLs — use ShellExecute on Windows,
-                    # webbrowser module on all platforms (most reliable)
                     import sys
                     if sys.platform == "win32":
                         os.startfile(path)
                     else:
                         webbrowser.open(path)
-
                 elif os.path.isfile(path):
-                    # Direct executable — launch without shell=True so the
-                    # path is passed correctly even if it contains spaces
-                    subprocess.Popen(
+                    proc = subprocess.Popen(
                         [path],
                         cwd=os.path.dirname(path),
                         creationflags=subprocess.DETACHED_PROCESS if hasattr(subprocess, "DETACHED_PROCESS") else 0,
                     )
-
+                    # Track the PID we just launched so the card shows "Running"
+                    QTimer.singleShot(0, lambda p=proc.pid: self._on_launched(p))
                 else:
-                    # Fallback: let the OS handle whatever string we have
                     import sys
                     if sys.platform == "win32":
                         os.startfile(path)
                     else:
                         subprocess.Popen(path, shell=True)
-
             except Exception as e:
                 print(f"[GameVault] Launch error for '{name}': {e}")
 
         threading.Thread(target=_do_launch, daemon=True).start()
+
+    def _on_launched(self, pid):
+        """Called on the main thread after a direct-exe launch so we can show Running immediately."""
+        if self._destroyed:
+            return
+        self._running_pid = pid
+        self._set_running_state(True)
+        with _running_lock:
+            _currently_running_game["pid"]  = pid
+            _currently_running_game["name"] = self._game["name"]
+            _currently_running_game["card"] = self
 
     def mouseDoubleClickEvent(self, event):
         pass
@@ -2656,16 +2875,12 @@ class GameVaultWindow(QWidget):
         self._bg = None
         self._main_ui_built = False
 
-        # Show loader FIRST — cover entire window
         self._loader = LoadingScreen(self)
         self._loader.setGeometry(self.rect())
         self._loader.show()
         self._loader.raise_()
 
-        # Allow the loader to paint before any heavy work starts
         QApplication.processEvents()
-
-        # Kick off the loading sequence
         QTimer.singleShot(80, self._start_loading_sequence)
 
     def _start_loading_sequence(self):
@@ -2777,45 +2992,23 @@ class GameVaultWindow(QWidget):
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════════════════
-app = QApplication([])
-app.setStyle("Fusion")
-
-from PySide6.QtGui import QPalette
-palette = QPalette()
-palette.setColor(QPalette.Window,          QColor(7, 7, 9))
-palette.setColor(QPalette.WindowText,      QColor(232, 232, 240))
-palette.setColor(QPalette.Base,            QColor(10, 10, 16))
-palette.setColor(QPalette.AlternateBase,   QColor(13, 13, 18))
-palette.setColor(QPalette.Text,            QColor(232, 232, 240))
-palette.setColor(QPalette.Button,          QColor(13, 13, 18))
-palette.setColor(QPalette.ButtonText,      QColor(232, 232, 240))
-app.setPalette(palette)
-
-window = GameVaultWindow()
-window.show()
-app.exec()
+import sys
 
 if __name__ == "__main__":
-    import sys
-    
-    # 1. Protocol Handler (Keep this as you have it)
-    if len(sys.argv) > 1 and "gamevault://" in sys.argv[1]:
-        print("Protocol received, closing second instance.")
-        sys.exit(0)
-
-    # 2. Normal App Startup
     app = QApplication(sys.argv)
-    
-    # 3. Create your Main Window
-    # Since your code didn't include the 'MainWindow' class, 
-    # I'll assume you're calling it GameVault.
-    # Replace 'GameVault' with the actual class name of your UI.
-    try:
-        window = GameVault() 
-        window.show()
-    except NameError:
-        # If you haven't written the MainWindow/GameVault class yet,
-        # This part will fail. You'll need to define that class first!
-        print("Error: MainWindow/GameVault class is not defined yet.")
-        
+    app.setStyle("Fusion")
+
+    from PySide6.QtGui import QPalette
+    palette = QPalette()
+    palette.setColor(QPalette.Window,          QColor(7, 7, 9))
+    palette.setColor(QPalette.WindowText,      QColor(232, 232, 240))
+    palette.setColor(QPalette.Base,            QColor(10, 10, 16))
+    palette.setColor(QPalette.AlternateBase,   QColor(13, 13, 18))
+    palette.setColor(QPalette.Text,            QColor(232, 232, 240))
+    palette.setColor(QPalette.Button,          QColor(13, 13, 18))
+    palette.setColor(QPalette.ButtonText,      QColor(232, 232, 240))
+    app.setPalette(palette)
+
+    window = GameVaultWindow()
+    window.show()
     sys.exit(app.exec())
