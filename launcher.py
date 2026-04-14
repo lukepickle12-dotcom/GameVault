@@ -178,7 +178,7 @@ QFrame#LoadBg {
         self._done = True
         self._shimmer_timer.stop()
         remaining_pct = 100.0 - self._progress_bar.fillPct
-        fill_duration = max(200, int(500 * remaining_pct / 100.0))
+       fill_duration = self._progress_bar._anim.duration()
         self._progress_bar.set_value(100, duration_ms=fill_duration)
 
         def _start_fade():
