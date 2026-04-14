@@ -48,13 +48,10 @@ except Exception:
 class SmoothProgressBar(QWidget):
     def __init__(self, width=360, height=8, parent=None):
         super().__init__(parent)
-
         self._bar_width = width
         self._bar_height = height
         self.setFixedSize(width, height)
-
         self._fill_pct = 0.0
-
         self._anim = QPropertyAnimation(self, b"fillPct", self)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
 
@@ -77,33 +74,23 @@ class SmoothProgressBar(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-
         w = self._bar_width
         h = self._bar_height
-
-        # background bar
         p.setBrush(QBrush(QColor("#2a1a40")))
         p.setPen(QPen(QColor("#534ab7"), 1))
         p.drawRoundedRect(0, 0, w, h, h // 2, h // 2)
-
-        # fill
         fill_w = int(w * self._fill_pct / 100.0)
-
         if fill_w > 0:
             grad = QLinearGradient(0, 0, fill_w, 0)
             grad.setColorAt(0.0, QColor("#534ab7"))
             grad.setColorAt(0.5, QColor("#afa9ec"))
             grad.setColorAt(1.0, QColor("#7f77dd"))
-
             p.setPen(Qt.NoPen)
             p.setBrush(QBrush(grad))
-
             clip = QPainterPath()
             clip.addRoundedRect(QRectF(0, 0, w, h), h / 2, h / 2)
             p.setClipPath(clip)
-
             p.drawRect(0, 0, fill_w, h)
-
         p.end()
 
 
@@ -113,143 +100,117 @@ class SmoothProgressBar(QWidget):
 class LoadingScreen(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-
         self.setAttribute(Qt.WA_TranslucentBackground)
-
         self._done = False
-
+        self._opacity_effect = QGraphicsOpacityEffect(self)
+        self._opacity_effect.setOpacity(1.0)
+        self.setGraphicsEffect(self._opacity_effect)
         self._build_ui()
-        self._setup_fade()
-
         self._shimmer_timer = QTimer(self)
         self._shimmer_timer.setInterval(600)
         self._shimmer_timer.timeout.connect(self._shimmer)
         self._shimmer_phase = 0
         self._shimmer_timer.start()
 
-    # ---------------- UI ----------------
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setAlignment(Qt.AlignCenter)
-
-        self._bg = QFrame(self)
-        self._bg.setObjectName("LoadBg")
-        self._bg.setStyleSheet("""
+        bg = QFrame(self)
+        bg.setObjectName("LoadBg")
+        bg.setStyleSheet("""
 QFrame#LoadBg {
     background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
         stop:0 #07070d, stop:0.5 #0a0a18, stop:1 #070710);
     border: none;
 }""")
-
-        inner = QVBoxLayout(self._bg)
+        inner = QVBoxLayout(bg)
         inner.setAlignment(Qt.AlignCenter)
         inner.setSpacing(0)
         inner.setContentsMargins(40, 40, 40, 40)
-
         logo = QLabel("GAME\nVAULT")
         logo.setAlignment(Qt.AlignCenter)
         logo.setStyleSheet(
-            "font-size: 38px; font-weight: 700; color: #afa9ec;"
-            "letter-spacing: 8px; font-family: Consolas;"
+            "font-size: 38px; font-weight: 700; color: #afa9ec; "
+            "letter-spacing: 8px; font-family: 'Consolas', monospace; "
+            "background: transparent; line-height: 1.2;"
         )
         inner.addWidget(logo)
-
         inner.addSpacing(6)
-
         dot = QLabel("●")
         dot.setAlignment(Qt.AlignCenter)
-        dot.setStyleSheet("color: #534ab7; font-size: 10px;")
+        dot.setStyleSheet("color: #534ab7; font-size: 10px; background: transparent;")
         inner.addWidget(dot)
-
         inner.addSpacing(32)
-
         self._progress_bar = SmoothProgressBar(width=360, height=8)
         inner.addWidget(self._progress_bar, alignment=Qt.AlignCenter)
-
         inner.addSpacing(14)
-
         self._status_lbl = QLabel("Initialising…")
         self._status_lbl.setAlignment(Qt.AlignCenter)
         self._status_lbl.setStyleSheet(
-            "font-size: 11px; color: #6b6b80; letter-spacing: 2px;"
-            "font-family: Consolas;"
+            "font-size: 11px; color: #6b6b80; letter-spacing: 2px; "
+            "font-family: 'Consolas', monospace; background: transparent;"
         )
         inner.addWidget(self._status_lbl)
-
         inner.addSpacing(8)
-
         self._done_lbl = QLabel("✓  READY")
         self._done_lbl.setAlignment(Qt.AlignCenter)
         self._done_lbl.setStyleSheet(
-            "font-size: 10px; font-weight: 700; color: #00ff9d;"
-            "letter-spacing: 3px; font-family: Consolas;"
+            "font-size: 10px; font-weight: 700; color: #00ff9d; "
+            "letter-spacing: 3px; font-family: 'Consolas', monospace; background: transparent;"
         )
         self._done_lbl.setVisible(False)
         inner.addWidget(self._done_lbl)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(bg)
 
-        root.addWidget(self._bg)
-
-    # ---------------- fade setup ----------------
-    def _setup_fade(self):
-        # IMPORTANT: fade the BG frame so EVERYTHING inside fades together
-        self._opacity_effect = QGraphicsOpacityEffect(self._bg)
-        self._opacity_effect.setOpacity(1.0)
-        self._bg.setGraphicsEffect(self._opacity_effect)
-
-    # ---------------- progress ----------------
     def set_progress(self, pct, status_text="", duration_ms=400):
         if self._done:
             return
-
-        self._progress_bar.set_value(pct, duration_ms)
-
+        self._progress_bar.set_value(pct, duration_ms=duration_ms)
         if status_text:
             self._status_lbl.setText(status_text)
 
-    # ---------------- finish ----------------
     def finish_and_hide(self, on_done=None):
         if self._done:
             return
-
         self._done = True
         self._shimmer_timer.stop()
-
-        fill_duration = self._progress_bar._anim.duration()
-        BLACKSCREEN_HOLD = 800
+        remaining_pct = 100.0 - self._progress_bar.fillPct
+       fill_duration = self._progress_bar._anim.duration()
+        self._progress_bar.set_value(100, duration_ms=fill_duration)
 
         def _start_fade():
             self._done_lbl.setVisible(True)
-            QTimer.singleShot(250, lambda: self._fade_out(on_done))
+            QTimer.singleShot(300, lambda: self._fade_out(on_done))
 
-        QTimer.singleShot(fill_duration + BLACKSCREEN_HOLD, _start_fade)
-
-    # ---------------- fade ----------------
+BLACKSCREEN_EXTRA_DELAY = 800
+QTimer.singleShot(fill_duration + 50 + BLACKSCREEN_EXTRA_DELAY, _start_fade)
     def _fade_out(self, on_done=None):
         self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
         self._fade_anim.setDuration(450)
         self._fade_anim.setStartValue(1.0)
         self._fade_anim.setEndValue(0.0)
         self._fade_anim.setEasingCurve(QEasingCurve.InOutCubic)
-
         if on_done:
             self._fade_anim.finished.connect(on_done)
-
         self._fade_anim.finished.connect(self.hide)
         self._fade_anim.start()
 
-    # ---------------- shimmer ----------------
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+
     def _shimmer(self):
         if self._done:
             return
-
         self._shimmer_phase = (self._shimmer_phase + 1) % 2
         color = "#9a94e0" if self._shimmer_phase == 0 else "#6b6b80"
-
         self._status_lbl.setStyleSheet(
-            f"font-size: 11px; color: {color}; letter-spacing: 2px;"
-            "font-family: Consolas;"
+            f"font-size: 11px; color: {color}; letter-spacing: 2px; "
+            "font-family: 'Consolas', monospace; background: transparent;"
         )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  DISCORD OAUTH2 CONFIG
