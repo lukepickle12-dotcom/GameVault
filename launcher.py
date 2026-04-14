@@ -185,8 +185,8 @@ QFrame#LoadBg {
             self._done_lbl.setVisible(True)
             QTimer.singleShot(300, lambda: self._fade_out(on_done))
 
-        QTimer.singleShot(fill_duration + 50, _start_fade)
-
+BLACKSCREEN_EXTRA_DELAY = 800
+QTimer.singleShot(fill_duration + 50 + BLACKSCREEN_EXTRA_DELAY, _start_fade)
     def _fade_out(self, on_done=None):
         self._fade_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
         self._fade_anim.setDuration(450)
