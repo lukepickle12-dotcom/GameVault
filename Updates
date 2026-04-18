@@ -1,0 +1,26 @@
+[VERSION 1.3.0]
+DATE: April 18, 2026
+
+[ADDED]
+- Dark mode toggle in settings panel
+- Discord OAuth login flow
+- Live background support for GIFs and MP4s
+
+[FIXED]
+- Steam library scan now detects custom install paths
+- Game card cover images no longer flicker on resize
+
+[CHANGED]
+- Loading screen now fades out with animation
+- Profile dialog redesigned with avatar picker
+
+---
+
+[VERSION 1.2.1]
+DATE: March 30, 2026
+
+[ADDED]
+- Epic Games library scanner
+
+[FIXED]
+- Crash on missing games.json file
